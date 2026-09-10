@@ -231,8 +231,13 @@ def state_directory(path):
 
 @contextlib.contextmanager
 def locked(directory, name):
-    fd = os.open(name + '.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
-                 0o600, dir_fd=directory)
+    flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        # Darwin can return ENOENT when nonexclusive O_CREAT races another
+        # creator. Separate creation from opening the existing persistent lock.
+        fd = os.open(name + '.lock', flags | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=directory)
+    except FileExistsError:
+        fd = os.open(name + '.lock', flags, dir_fd=directory)
     try:
         private_file(fd)
         fcntl.flock(fd, fcntl.LOCK_EX)

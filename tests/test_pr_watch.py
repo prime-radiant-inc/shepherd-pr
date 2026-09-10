@@ -1,10 +1,12 @@
 """Offline CLI tests: only the gh executable is replaced with a fixture server."""
 import copy
 import json
+import multiprocessing
 import os
 from pathlib import Path
 import subprocess
 import stat
+import runpy
 import sys
 import tempfile
 import unittest
@@ -74,6 +76,23 @@ def observation():
         'review_comments': [], 'reviews': [],
         'checks': {'total_count': 0, 'check_runs': []}, 'statuses': [],
     }
+
+
+def concurrent_lock_worker(helper, directory, barrier, results):
+    # Real helper and real filesystem: isolate the first-create boundary from gh
+    # startup timing while the CLI test continues to verify observable snapshots.
+    watcher = runpy.run_path(helper)
+    errors = []
+    with watcher['state_directory'](directory) as descriptor:
+        for number in range(100):
+            barrier.wait(timeout=30)
+            try:
+                with watcher['locked'](descriptor, str(number)):
+                    pass
+            except OSError as error:
+                errors.append((number, error.errno, str(error)))
+            barrier.wait(timeout=30)
+    results.put(errors)
 
 
 class WatcherTests(unittest.TestCase):
@@ -388,6 +407,32 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(sum('PRWATCH armed' in out for out in outputs), 1, outputs)
         self.assertEqual(sum('PRWATCH no change' in out for out in outputs), 3, outputs)
         self.assertEqual(json.loads(self.baseline().read_bytes())['pull']['head'], 'a' * 40)
+
+    def test_concurrent_first_lock_creation(self):
+        context = multiprocessing.get_context('spawn')
+        barrier = context.Barrier(4)
+        results = context.Queue()
+        helper = str(SCRIPT.with_name('pr_watch.py'))
+        processes = [context.Process(target=concurrent_lock_worker,
+                                     args=(helper, str(self.state), barrier, results)) for _ in range(4)]
+        errors = []
+        try:
+            for process in processes:
+                process.start()
+            for _ in processes:
+                errors.extend(results.get(timeout=30))
+            for process in processes:
+                process.join(timeout=30)
+                self.assertEqual(process.exitcode, 0)
+        finally:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                process.join(timeout=30)
+            results.close()
+            results.join_thread()
+        self.assertEqual(errors, [], f'concurrent first creation must succeed: {errors[:5]}')
+        self.assertEqual(len(list(self.state.glob('*.lock'))), 100)
 
     def test_missing_gh_is_operational_error(self):
         (self.bin / 'gh').unlink()
