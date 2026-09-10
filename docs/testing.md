@@ -1,6 +1,6 @@
 # Testing and evidence
 
-## Status at portable-reference implementation (2026-09-10)
+## Verification status (2026-09-10)
 
 - **Watcher:** Task 1 and the parent report 31 passing tests at `49b11a7`,
   with independent review complete. These execute real shell/Python/state
@@ -22,11 +22,13 @@
 - **Independent Task 2 review:** found P2, the finite-example link escaped the
   installed skill bundle into the repository README. Reproduced with an isolated
   skill copy, then fixed by inlining the canonical example in the skill and
-  linking README to it. Standalone-copy and Bash syntax checks pass; scoped
-  independent re-review is PENDING, not claimed complete.
-- **Packaging:** generated guides, installation table, regeneration checks and
-  container installation checks are PENDING Task 3. Generated integrations
-  must not be described as verified authenticated harness installations.
+  linking README to it. Standalone-copy and Bash syntax checks pass; parent
+  reports scoped independent re-review **PASS at `2643b8d`**.
+- **Packaging:** all 11 upstream adapters, 27 generated files plus generation
+  manifest and README installation table are emitted by the pinned wrapper.
+  Fresh delivered-wrapper clone/build, regeneration, `validate`, and
+  `bump --check` pass. Real negative drift checks reject regenerated README
+  and a newly recreated `.codex-plugin/plugin.json` (exit 1 each).
 - **Live cross-harness model verification:** not performed.
 
 ## Application scenario and scoring
@@ -73,103 +75,126 @@ Coverage includes baseline/no-change, edited bodies, head/CI/merge state,
 pagination, empty lists, malformed responses, explicit repository targeting,
 private independent state, failed-request baseline preservation, and locking.
 
-## Reproduce document checks
+## Reproduce deterministic packaging/document checks
 
-Run this Python check from the repository root. It validates this skill's
-restricted two-field YAML frontmatter, local link targets and heading anchors,
-executable entry point and adjacent helper, and license terms against the
-independent MIT text from SPDX. The MIT comparison requires network access;
-a network failure is an incomplete check, not a pass. Generated guide links
-are explicitly reported as pending until Task 3 produces them.
+```bash
+python3 -m unittest discover -s tests -v
+find scripts skills -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+git diff --check
+```
 
-```python
+Local full discovery: **39 tests passed** (31 watcher, 8 packaging), with
+shell syntax and `git diff --check` exiting zero. Default discovery is
+network-free (Python 3.9+, Bash, Git). Packaging tests
+validate skill frontmatter, license notices, generated manifest hashes and
+executable assets, local links/heading anchors, all install guides and README
+markers. They copy the skill alone into a temporary directory and check its
+links, bundled Bash examples and real watcher help outside the repository.
+Drift regressions use isolated Git repositories and a fixture generator to
+check clean success and tracked README, staged, new-file and new-dotfile
+failure. These fixtures test the gate, not everyharness behavior; CI separately
+runs real generation. Wrapper boundary fixtures check wrong source pin/origin,
+tracked/untracked/ignored source edits, stale executable output replacement,
+Node version rejection and help without invoking real npm or Node.
+Content-level behavior still needs application/review.
+
+### Independent MIT comparison (opt-in network check)
+
+The independent SPDX full-license comparison passed during Task 2 and was
+rerun successfully during Task 3. Reproduce it separately; it is deliberately not part of default discovery. Network
+failure leaves this check incomplete, not passing:
+
+```bash
+python3 - <<'PY'
 from pathlib import Path
-import json, os, re, urllib.request
-
-root = Path.cwd()
-skill = root / 'skills/shepherd-pr/SKILL.md'
-text = skill.read_text()
-assert text.startswith('---\n')
-front, body = text[4:].split('\n---\n', 1)
-assert len(front) <= 1024
-lines = front.splitlines()
-assert len(lines) == 2
-fields = dict(line.split(': ', 1) for line in lines)
-assert set(fields) == {'name', 'description'}
-assert fields['name'] == skill.parent.name == 'shepherd-pr'
-assert re.fullmatch(r'[a-z0-9-]+', fields['name'])
-assert fields['description'].startswith('Use when ')
-assert len(fields['description']) < 500
-pending = {'docs/install/claude-code.md', 'docs/install/codex.md',
-           'docs/support-matrix.md'}
-for doc in [skill, root / 'README.md', root / 'docs/testing.md']:
-    for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', doc.read_text()):
-        if '://' in target:
-            continue
-        name, _, anchor = target.partition('#')
-        path = (doc.parent / name).resolve() if name else doc
-        assert path.is_relative_to(root), target
-        relative = path.relative_to(root).as_posix()
-        if not path.exists() and relative in pending:
-            print('PENDING generation:', relative)
-            continue
-        assert path.is_file(), target
-        if anchor:
-            headings = re.findall(r'^#+ (.+)$', path.read_text(), re.M)
-            slugs = [re.sub(r'[^\w -]', '', h).lower().replace(' ', '-')
-                     for h in headings]
-            assert anchor in slugs, target
-entry = skill.parent / 'references/pr-watch.sh'
-assert os.access(entry, os.X_OK)
-assert (entry.parent / 'pr_watch.py').is_file()
-readme = (root / 'README.md').read_text()
-for marker in ['<!-- everyharness:install:start -->',
-               '<!-- everyharness:install:end -->']:
-    assert readme.count(marker) == 1
-assert readme.index('<!-- everyharness:install:start -->') < readme.index(
-    '<!-- everyharness:install:end -->')
-license_text = (root / 'LICENSE').read_text()
+import json, urllib.request
+license_text = Path('LICENSE').read_text()
 assert license_text.startswith('MIT License\n')
-copyright = 'Copyright (c) 2026 Prime Radiant, Inc.'
-assert copyright in license_text
+assert 'Copyright (c) 2026 Prime Radiant, Inc.' in license_text
 url = 'https://raw.githubusercontent.com/spdx/license-list-data/main/json/details/MIT.json'
 with urllib.request.urlopen(url, timeout=30) as response:
     canonical = json.load(response)['licenseText']
 terms = lambda s: ' '.join(s[s.index('Permission is hereby granted'):].split())
 assert terms(license_text) == terms(canonical)
-print('PASS: frontmatter, relative links/assets, README markers, full MIT terms')
+print('PASS: full MIT terms match SPDX')
+PY
 ```
 
-Also run `git diff --check`. The content-level checks (trigger-only description,
-permissions, evidence trust and stale review handling) require human/agent review;
-syntax checks alone do not prove application compliance.
+## Pinned generator and regeneration
 
-## Standalone skill bundle check
+Requires Git, npm, Node.js >=20 and GitHub/npm network access. Local Task 3
+fresh clone/build ran with Node **v26.5.0**, npm **11.17.0**; CI uses Node 22.
+The wrapper clones upstream commit
+`4f7c5e2112583b1a0d25d4d9413bd06f68f6f8b5`, checks origin/HEAD/clean source,
+and rebuilds with its lockfile on every invocation. Both dependencies and
+build output are isolated in ignored `.tools/everyharness`, never installed
+from the generated root `package.json`. Preserve any intentional cache edits,
+then move `.tools/everyharness` aside to recover a dirty/wrong checkout. Do not
+run wrappers concurrently.
 
-Run from the repository root. This copies only the installable skill directory,
-rejects escaping/missing local links, and syntax-checks every bundled Bash
-example without running its GitHub commands:
-
-```python
-from pathlib import Path
-import re, shutil, subprocess, tempfile
-
-with tempfile.TemporaryDirectory() as temporary:
-    bundle = Path(temporary) / 'shepherd-pr'
-    shutil.copytree('skills/shepherd-pr', bundle)
-    missing = []
-    for doc in bundle.rglob('*.md'):
-        text = doc.read_text()
-        for target in re.findall(r'\[[^\]]+\]\(([^)]+)\)', text):
-            if '://' in target:
-                continue
-            name = target.partition('#')[0]
-            path = (doc.parent / name).resolve() if name else doc.resolve()
-            if not path.is_relative_to(bundle.resolve()) or not path.is_file():
-                missing.append(target)
-        for code in re.findall(r'```bash\n(.*?)\n```', text, re.S):
-            subprocess.run(['bash', '-n'], input=code, text=True, check=True)
-    print('Standalone-copy missing links:', missing)
-    assert not missing, missing
-    print('PASS: isolated skill links and bundled Bash syntax')
+```bash
+bash scripts/everyharness.sh --help
+bash scripts/everyharness.sh generate
+bash scripts/everyharness.sh validate
+bash scripts/everyharness.sh bump --check
+# Commit reviewed source/generated updates before the clean-checkout gate:
+bash scripts/check-generated.sh
 ```
+
+`validate` alone is insufficient at this pin: configuration changes can need
+regeneration before validation notices them. The drift script therefore runs
+real generation, then checks all tracked/staged and untracked changes with
+`git status --porcelain --untracked-files=all`, including README and dotfiles.
+It never stages to hide drift. Only tooling/Python caches and private planning
+artifacts are ignored. All adapters are generated upstream without manual
+fixes or bootstrap hooks. The source config includes `author.name: Prime Radiant, Inc.`
+because the real Claude strict marketplace validator requires `owner`; upstream
+emits that field from `author`. A missing-owner regression failed before this
+source-only fix and passed after regeneration.
+
+The fresh lockfile install reports **3 vulnerabilities: 2 moderate
+(vitest/@vitest/mocker), 1 high (fast-uri)** in upstream development tooling.
+The source pin/lockfile are unchanged; no `npm audit fix` was applied. npm 11
+also warns about unapproved install scripts for esbuild and fsevents; the
+TypeScript build nevertheless exits zero. These are disclosed warnings, not a
+clean security audit. Upstream handoff reports 419 passing tests and 8 dogfood
+skips; that upstream suite is not this plugin's deterministic suite.
+
+## Container-backed offline install checks
+
+Docker is a separate opt-in gate, not a default unit-test dependency. On this
+arm64 macOS host the verified image is linux/amd64; select that platform:
+
+```bash
+DOCKER_DEFAULT_PLATFORM=linux/amd64 bash scripts/everyharness.sh test --image ghcr.io/prime-radiant-inc/everyharness-container@sha256:5933c111cbfff263cca76e24e893766cc6b558577e45f691e213c498a8891eea
+```
+
+These are offline manifest/CLI installation checks, not authenticated model
+runs or evidence that the not-yet-published public URL can be fetched. Kimi's
+TUI, Cursor login and Devin's absent CLI limit the upstream checks; Hermes
+registration and Pi hooks include stub-context checks.
+
+Actual corrected run: **exit 0**, **28 `ok` lines, 5 `skip` lines, no `not ok`**.
+It completed within the ten-minute attempt bound (no timeout). Static checks
+passed for all 11 adapters. Installation checks passed for Claude Code,
+Gemini, Codex (model-visible prompt, not a model call), Copilot, OpenCode
+(including the `--pure` negative control), Grok (populated skill directory),
+Droid (on-disk cache), Hermes (registration with stub context), and Pi
+(resource-discovery hook with stub context). Executable watcher mode survived
+in the source copy and Claude/Gemini/Codex/Copilot/Droid/Grok/Hermes installs.
+
+| Actual skip | Reason |
+| --- | --- |
+| Agent Plugins `mcp.json` | No MCP config generated for this skill-only plugin. |
+| Kimi install | TUI-only; this run did not drive or verify the TUI. |
+| Cursor install | Login required before plugin loading. |
+| Devin install | No Devin CLI in the pinned image. |
+| Kimi executable-bit install check | TUI-only install. |
+
+Upstream's Kimi skip text says “verified by hand via tmux”; that refers to
+upstream's historical check, **not work performed for this plugin**. The first
+actual run failed Claude's missing marketplace-owner validation and associated
+Claude/Copilot installs; it was stopped to fix config and regenerate. The
+corrected full run above passed without changing generator/check scripts or
+weakening assertions. Public-URL fetchability, authenticated cross-harness
+model behavior and live merge workflows remain unverified.

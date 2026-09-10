@@ -8,16 +8,30 @@ Includes a read-only change watcher; no hosted service or automatic approval.
 
 Native integration files and installation guides are generated with
 [everyharness](https://github.com/prime-radiant-inc/everyharness).
-The table below is reserved for its generator.
+The table below and linked guides are generated from `everyharness.yaml`.
 
 <!-- everyharness:install:start -->
-Installation table pending packaging generation.
+
+| Harness | Install |
+|---|---|
+| Claude Code | see docs/install/claude-code.md |
+| Cursor | see docs/install/cursor.md |
+| Codex | see docs/install/codex.md |
+| Devin CLI | see docs/install/devin.md |
+| Kimi Code | see docs/install/kimi.md |
+| Gemini CLI | see docs/install/gemini.md |
+| OpenCode | see docs/install/opencode.md |
+| Pi | see docs/install/pi.md |
+| Hermes Agent | see docs/install/hermes.md |
+| Agent Plugins 1.0 clients | see docs/install/agent-plugins-1.0.md |
+| Factory Droid / Grok / Copilot (marketplace descriptor) | see docs/install/agents-marketplace.md |
+
 <!-- everyharness:install:end -->
 
-Generated guides (pending packaging generation):
+Generated guides:
 [Claude Code](docs/install/claude-code.md), [Codex](docs/install/codex.md),
-and the [support matrix](docs/support-matrix.md). The generated table will
-list the remaining guides. Use the guide for your actual harness; generation
+and the [support matrix](docs/support-matrix.md). The generated table
+lists the remaining guides. Use the guide for your actual harness; generation
 is not proof of a verified installation or equivalent monitoring capability.
 Upstream describes 12 harnesses through 11 adapters; Antigravity is roadmap.
 See [verification status](docs/testing.md) for actual coverage.
@@ -131,22 +145,38 @@ comparison, not merely a new-comment-ID check.
 
 ## Development and limitations
 
-Run the deterministic watcher tests without network access or credentials:
+Run all deterministic watcher and packaging tests without network access or
+credentials (Python 3.9+, Bash, Git):
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_pr_watch.py' -v
-bash -n skills/shepherd-pr/references/pr-watch.sh
+python3 -m unittest discover -s tests -v
+find scripts skills -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 ```
 
-See [testing and evidence](docs/testing.md) for document validation and the
-pending application/packaging gates. Packaging generation is a separate
-release step: pinned everyharness source commit
-`4f7c5e2112583b1a0d25d4d9413bd06f68f6f8b5`, Node.js 20+, lockfile-based build,
-all supported adapters, no automatic bootstrap hook. The reproducible
-wrapper and regeneration instructions are pending packaging implementation;
-do not hand-maintain native manifests. Release checks must include generation
-drift (including README), validation, and version consistency, not validation
-alone.
+Regenerate native manifests; do not hand-edit generated outputs. The wrapper
+requires Git, npm, **Node.js 20+**, and network access. It clones everyharness
+source commit `4f7c5e2112583b1a0d25d4d9413bd06f68f6f8b5` into ignored
+`.tools/everyharness`, verifies the pinned origin/HEAD and clean source, then
+runs `npm ci && npm run build` there on every call. Cached build output is
+replaced, not trusted. Root `package.json` is generated plugin metadata, not a
+tooling dependency manifest. Do not run wrappers concurrently.
+
+```bash
+bash scripts/everyharness.sh --help
+bash scripts/everyharness.sh generate
+bash scripts/everyharness.sh validate
+bash scripts/everyharness.sh bump --check
+# After reviewing and committing changes, from a clean checkout:
+bash scripts/check-generated.sh
+```
+
+The drift gate regenerates and rejects tracked, staged, and newly generated
+files, including README and dotfiles. CI runs all deterministic tests and these
+real generator gates. All 11 upstream adapters are emitted; no automatic
+bootstrap hook is configured. See [testing and evidence](docs/testing.md) for
+actual local versions, Docker install checks/skips and the unchanged upstream
+npm audit warnings (2 moderate, 1 high). Generated integrations are not proof
+of authenticated cross-harness model behavior.
 
 This release targets GitHub.com, not GitHub Enterprise. Observations span
 multiple API requests, not a transaction: reconfirm current gates before a

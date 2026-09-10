@@ -1,0 +1,11 @@
+name: shepherd-pr
+version: 0.1.0
+description: Shepherd GitHub pull requests through CI and review.
+license: MIT
+author:
+  name: Prime Radiant, Inc.
+repository: https://github.com/prime-radiant-inc/shepherd-pr
+marketplace:
+  name: shepherd-pr
+  description: Shepherd PR plugin marketplace
+  source: repository

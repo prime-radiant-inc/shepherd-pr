@@ -1,0 +1,11 @@
+{
+  "name": "shepherd-pr",
+  "version": "0.1.0",
+  "description": "Shepherd GitHub pull requests through CI and review.",
+  "author": {
+    "name": "Prime Radiant, Inc."
+  },
+  "repository": "https://github.com/prime-radiant-inc/shepherd-pr",
+  "license": "MIT",
+  "skills": "./skills/"
+}

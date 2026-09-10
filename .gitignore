@@ -1,0 +1,4 @@
+# Generator source/build dependencies are not plugin package metadata.
+/.tools/
+__pycache__/
+*.pyc

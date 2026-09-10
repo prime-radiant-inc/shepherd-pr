@@ -1,0 +1,21 @@
+{
+  "name": "shepherd-pr",
+  "description": "Shepherd PR plugin marketplace",
+  "plugins": [
+    {
+      "name": "shepherd-pr",
+      "description": "Shepherd GitHub pull requests through CI and review.",
+      "version": "0.1.0",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/prime-radiant-inc/shepherd-pr"
+      },
+      "author": {
+        "name": "Prime Radiant, Inc."
+      }
+    }
+  ],
+  "owner": {
+    "name": "Prime Radiant, Inc."
+  }
+}
