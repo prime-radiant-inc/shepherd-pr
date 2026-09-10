@@ -78,6 +78,23 @@ def observation():
     }
 
 
+def pending_review():
+    # Official GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews returns
+    # components/schemas/pull-request-review: submitted_at is optional and,
+    # when present, a date-time string. Keep all required review fields here.
+    # https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json
+    return {
+        'id': 3, 'node_id': 'PRR_fixture', 'body': 'draft review', 'state': 'PENDING',
+        'commit_id': 'a' * 40, 'user': None, 'author_association': 'NONE',
+        'html_url': 'https://github.com/prime-radiant-inc/evener/pull/954#pullrequestreview-3',
+        'pull_request_url': 'https://api.github.com/repos/prime-radiant-inc/evener/pulls/954',
+        '_links': {
+            'html': {'href': 'https://github.com/prime-radiant-inc/evener/pull/954#pullrequestreview-3'},
+            'pull_request': {'href': 'https://api.github.com/repos/prime-radiant-inc/evener/pulls/954'},
+        },
+    }
+
+
 def concurrent_lock_worker(helper, directory, barrier, results):
     # Real helper and real filesystem: isolate the first-create boundary from gh
     # startup timing while the CLI test continues to verify observable snapshots.
@@ -203,6 +220,64 @@ class WatcherTests(unittest.TestCase):
             self.assert_success(result, 'PRWATCH change detected')
             self.assertIn('updated review text', result.stdout)
         self.assertEqual(json.loads(self.baseline().read_bytes())['reviews'][0]['commit_id'], 'a' * 40)
+
+    def test_pending_review_baseline_unchanged_body_edit_and_submission(self):
+        draft = pending_review()
+        self.data['reviews'] = [draft]
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        before = self.baseline().read_bytes()
+        snapshot = json.loads(before)
+        self.assertEqual(snapshot['reviews'][0]['state'], draft['state'])
+        self.assertEqual(snapshot['reviews'][0]['body'], draft['body'])
+        self.assert_success(self.run_watcher(), 'PRWATCH no change')
+        self.assertEqual(self.baseline().read_bytes(), before)
+
+        draft['body'] = 'edited draft review'
+        result = self.run_watcher()
+        self.assert_success(result, 'PRWATCH change detected')
+        printed = json.loads(result.stdout.split('\n', 1)[1])
+        self.assertEqual(printed['reviews'][0]['body'], draft['body'])
+        self.assertEqual(printed['reviews'][0]['state'], 'PENDING')
+        self.assertEqual(printed, json.loads(self.baseline().read_bytes()))
+        self.assert_success(self.run_watcher(), 'PRWATCH no change')
+
+        draft.update(state='COMMENTED', submitted_at='2026-09-10T19:00:00Z')
+        result = self.run_watcher()
+        self.assert_success(result, 'PRWATCH change detected')
+        submitted = json.loads(result.stdout.split('\n', 1)[1])['reviews'][0]
+        self.assertEqual(submitted['state'], draft['state'])
+        self.assertEqual(submitted['submitted_at'], draft['submitted_at'])
+        self.assertEqual(submitted['body'], draft['body'])
+        self.assert_success(self.run_watcher(), 'PRWATCH no change')
+
+    def test_pending_review_added_to_existing_baseline(self):
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        self.data['reviews'] = [pending_review()]
+        result = self.run_watcher()
+        self.assert_success(result, 'PRWATCH change detected')
+        printed = json.loads(result.stdout.split('\n', 1)[1])
+        self.assertEqual(printed['reviews'][0]['body'], self.data['reviews'][0]['body'])
+        self.assertEqual(printed['reviews'][0]['state'], 'PENDING')
+        self.assertEqual(printed, json.loads(self.baseline().read_bytes()))
+        self.assert_success(self.run_watcher(), 'PRWATCH no change')
+
+    def test_malformed_present_review_timestamp_preserves_baseline(self):
+        review = pending_review()
+        review.update(state='COMMENTED', submitted_at='2026-09-10T19:00:00Z')
+        self.data['reviews'] = [review]
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        before = self.baseline().read_bytes()
+        for state in ('PENDING', 'COMMENTED'):
+            for timestamp in (0, True, [], {}):
+                with self.subTest(state=state, timestamp=timestamp):
+                    review.update(state=state, submitted_at=timestamp)
+                    result = self.run_watcher()
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn('invalid response shape: submitted_at', result.stderr)
+                    self.assertEqual(result.stdout, '')
+                    self.assertEqual(self.baseline().read_bytes(), before)
+        review.update(state='COMMENTED', submitted_at='2026-09-10T19:00:00Z')
+        self.assert_success(self.run_watcher(), 'PRWATCH no change')
 
     def test_head_mergeability_and_pr_state_changes(self):
         self.assert_success(self.run_watcher(), 'PRWATCH armed')

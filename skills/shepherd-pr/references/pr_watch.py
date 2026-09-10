@@ -150,7 +150,10 @@ def comment(obj, inline=False):
 
 def review(obj):
     result = selected(obj, [('id', int, False), ('body', str, True), ('state', str, False),
-                            ('submitted_at', str, True), ('commit_id', str, True)])
+                            ('commit_id', str, True)])
+    # GitHub omits submitted_at for pending (unsubmitted) reviews.
+    if 'submitted_at' in obj:
+        result['submitted_at'] = field(obj, 'submitted_at', str, nullable=True)
     result['user'] = author(obj)
     return result
 

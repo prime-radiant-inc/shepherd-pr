@@ -2,10 +2,12 @@
 
 ## Verification status (2026-09-10)
 
-- **Watcher:** Task 1 and the parent report 31 passing tests at `49b11a7`,
-  with independent review complete. These execute real shell/Python/state
-  behavior with deterministic GitHub CLI boundary fixtures, plus a real
-  synchronized lock-creation regression. They are not live agent tests.
+- **Watcher:** the final timestamp fix passes 34 watcher tests, including
+  pending/unsubmitted reviews without `submitted_at`, draft body edits and
+  malformed present timestamp baseline preservation. These execute real
+  shell/Python/state behavior with deterministic GitHub CLI boundary fixtures,
+  plus a real synchronized lock-creation regression. They are not live agent
+  tests. Final scoped independent re-review belongs to the release parent.
 - **Live read-only smoke:** the parent reports a merged-PR baseline followed
   by an unchanged observation. This establishes a narrow authenticated read
   path, not active review/CI transition coverage or a live merge workflow.
@@ -75,6 +77,30 @@ Coverage includes baseline/no-change, edited bodies, head/CI/merge state,
 pagination, empty lists, malformed responses, explicit repository targeting,
 private independent state, failed-request baseline preservation, and locking.
 
+### Final review timestamp regression
+
+The official GitHub OpenAPI schema for
+`GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews` references
+`components/schemas/pull-request-review`: `submitted_at` is optional and its
+present value is a date-time string. The same schema supplies the required
+fields for the pending fixture and the non-string rejection reference:
+[GitHub REST API description](https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json).
+
+Before the fix, the real-CLI review subset ran four tests: both pending-review
+regressions failed with `invalid response shape: missing submitted_at` (exit 1);
+the submitted-review and malformed-present-timestamp controls passed. After
+the narrow optional-field fix, all four passed (exit 0). The regressions cover
+pending first baseline, addition to an existing baseline, unchanged observations,
+draft body edits, submission with a timestamp, and integer/boolean/list/object
+timestamps rejected in both pending and submitted states without changing the
+baseline. Existing submitted-review assertions and nullable timestamp tolerance
+are unchanged; the latter is compatibility behavior, not a schema-validity claim.
+
+Pinned `generate`, `validate` (`validate: clean`) and `bump --check` (all declared
+files in sync at `0.1.0`) were rerun successfully after this fix. Generation
+produced no tracked generated-output changes. No Docker, live GitHub smoke,
+SPDX comparison, or model/application scenario was repeated in this fix wave.
+
 ## Reproduce deterministic packaging/document checks
 
 ```bash
@@ -83,7 +109,8 @@ find scripts skills -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 git diff --check
 ```
 
-Local full discovery: **39 tests passed** (31 watcher, 8 packaging), with
+Local full discovery after the final timestamp fix: **42 tests passed**
+(34 watcher, 8 packaging), with
 shell syntax and `git diff --check` exiting zero. Default discovery is
 network-free (Python 3.9+, Bash, Git). Packaging tests
 validate skill frontmatter, license notices, generated manifest hashes and
@@ -152,6 +179,12 @@ because the real Claude strict marketplace validator requires `owner`; upstream
 emits that field from `author`. A missing-owner regression failed before this
 source-only fix and passed after regeneration.
 
+Deferred upstream template caveat: `docs/install/agents-marketplace.md` says
+Droid's install ID differs from Copilot's, but both actual commands here use
+`shepherd-pr@shepherd-pr` because the repository basename and marketplace name
+match. The commands are correct; the generic explanatory note is not. No
+generated guide or generator pin was manually changed for this wording nit.
+
 The fresh lockfile install reports **3 vulnerabilities: 2 moderate
 (vitest/@vitest/mocker), 1 high (fast-uri)** in upstream development tooling.
 The source pin/lockfile are unchanged; no `npm audit fix` was applied. npm 11
@@ -170,11 +203,12 @@ DOCKER_DEFAULT_PLATFORM=linux/amd64 bash scripts/everyharness.sh test --image gh
 ```
 
 These are offline manifest/CLI installation checks, not authenticated model
-runs or evidence that the not-yet-published public URL can be fetched. Kimi's
+runs or evidence that the public URL can be fetched. Kimi's
 TUI, Cursor login and Devin's absent CLI limit the upstream checks; Hermes
 registration and Pi hooks include stub-context checks.
 
-Actual corrected run: **exit 0**, **28 `ok` lines, 5 `skip` lines, no `not ok`**.
+Previous corrected Task 3 run (not repeated for the final timestamp fix):
+**exit 0**, **28 `ok` lines, 5 `skip` lines, no `not ok`**.
 It completed within the ten-minute attempt bound (no timeout). Static checks
 passed for all 11 adapters. Installation checks passed for Claude Code,
 Gemini, Codex (model-visible prompt, not a model call), Copilot, OpenCode
