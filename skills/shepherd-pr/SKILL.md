@@ -47,8 +47,21 @@ Choose only capabilities actually available:
 Agree an observation budget/cadence (for example, five observations spaced
 120 seconds apart); stop jobs/watches at the limit or outcome. CI progress
 also consumes change notifications. No goal tool is required. Never claim
-monitoring survives job completion or the harness session. See the
-[finite shell example](../../README.md#finite-monitoring).
+monitoring survives job completion or the harness session.
+
+### Finite shell example
+
+Run with **Bash** from the installed `shepherd-pr` skill directory; replace
+these illustrative repository/PR values with the authorized target:
+
+```bash
+for ((i=1; i<=5; i++)); do
+  bash references/pr-watch.sh --repo example/widgets --pr 42 || exit "$?"
+  if ((i<5)); then sleep 120; fi
+done
+```
+
+Five observations, four pauses, plus API time; this is not a wall-clock deadline.
 
 ## Triage and verify
 
