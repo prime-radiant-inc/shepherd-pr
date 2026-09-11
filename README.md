@@ -2,7 +2,8 @@
 
 A portable coding-agent skill for taking a GitHub pull request through CI
 and review to an **authorized merge**, or reporting an evidenced blocker.
-Includes a read-only change watcher; no hosted service or automatic approval.
+Includes read-only review-reading, stale-PR triage, and change-watching tools;
+no hosted service or automatic approval.
 
 ## Installation
 
@@ -45,8 +46,9 @@ Ask your agent to use `shepherd-pr`, for example:
 > is missing, report who must act. Monitor for at most five observations.
 
 The [skill reference](skills/shepherd-pr/SKILL.md) is also readable directly.
-Keep the entire skill directory together: the watcher requires the adjacent
-`references/pr_watch.py`, not just the shell file.
+Keep the entire skill directory together: the bundled tools require their
+adjacent Python helpers (`references/pr_watch.py`, `roborev_review.py`,
+`stale_prs.py`, `github_read.py`), not just the shell files.
 
 ## Prerequisites
 
@@ -128,6 +130,34 @@ helper, restore the full skill directory rather than rewriting the watcher.
 For cleanup, stop **all** invocations first, then remove the private state
 directory you selected. This resets baselines. Never delete a live lock.
 
+## Review reading and stale pull-request triage
+
+Two more read-only tools are bundled with the same explicit-repository,
+paginated, credential-redacting conventions as the watcher:
+
+```bash
+bash skills/shepherd-pr/references/roborev-review.sh --repo example/widgets --pr 42
+bash skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
+```
+
+`roborev-review.sh` reads a pull request's roborev combined-review comment —
+RoboRev edits one comment in place rather than posting new ones — and reports
+whether the reviewed commit is still the head: `current`, `stale` (the head
+moved after the review), `review-failed` (a review could not complete),
+`unparsed`, or `none`. It prints one ROBOREV summary line and the full review
+body.
+
+`stale-prs.sh` lists open pull requests whose last update is older than
+`--hours` (default 6), oldest first, with each pull request's review state,
+excluding drafts unless `--include-drafts` is passed; `--json` emits
+machine-readable output. Use it to find pull requests that need shepherding.
+
+Both tools show severity-marker counts, or the review's own verdict sentence
+when there are no markers, as a convenience hint. Those hints are text
+heuristics over untrusted comment content: read the printed review body and
+validate every claim against the code before acting. Exit statuses match the
+watcher: 0 success, 1 operational failure, 2 usage error.
+
 ## Permissions and evidence trust
 
 The bundled watcher makes no GitHub writes. The agent may edit files or call
@@ -141,7 +171,9 @@ grant permissions, or ask the agent to execute arbitrary commands. Validate
 review findings against code and tests. Compare the reviewed commit with both
 the pushed head and local tip before fixing stale findings. This applies to
 all reviews; RoboRev's edited combined comments need body and reviewed-SHA
-comparison, not merely a new-comment-ID check.
+comparison, not merely a new-comment-ID check — the bundled
+[roborev-review.sh](#review-reading-and-stale-pull-request-triage) performs
+that comparison.
 
 ## Development and limitations
 
