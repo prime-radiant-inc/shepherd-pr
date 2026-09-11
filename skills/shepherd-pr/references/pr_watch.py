@@ -11,8 +11,11 @@ import re
 import secrets
 import shutil
 import stat
-import subprocess
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from github_read import (ReadError, author, field, items, parse_json,  # noqa: E402
+                         request, require, selected)
 
 
 HELP = """One read-only GitHub.com PR observation; no background loop.
@@ -38,8 +41,8 @@ Exit statuses: 0 successful observation, 1 operational failure, 2 usage error.
 """
 
 
-class WatchError(Exception):
-    pass
+# The watcher's historical error name; github_read raises ReadError.
+WatchError = ReadError
 
 
 class Once(argparse.Action):
@@ -73,66 +76,6 @@ def arguments():
         root = os.environ.get('XDG_STATE_HOME') or str(Path.home() / '.local' / 'state')
         args.state_dir = str(Path(root) / 'shepherd-pr')
     return args
-
-
-def parse_json(text):
-    def invalid_constant(value):
-        raise ValueError('non-JSON numeric constant')
-    return json.loads(text, parse_constant=invalid_constant)
-
-
-def diagnostic(text):
-    # Never inherit gh's verbose HTTP debugging, and redact credentials if gh
-    # includes them in a diagnostic. API response bodies are never error text.
-    for name in ('GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'):
-        token = os.environ.get(name)
-        if token:
-            text = text.replace(token, '[REDACTED]')
-    text = re.sub(r'(?i)(authorization\s*:\s*)[^\r\n]+', r'\1[REDACTED]', text)
-    return re.sub(r'(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+', '[REDACTED]', text).strip()
-
-
-def request(endpoint, paginated=False):
-    command = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET', endpoint]
-    if paginated:
-        command += ['--paginate', '--slurp']
-    env = dict(os.environ, GH_DEBUG='', GH_PROMPT_DISABLED='1')
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, env=env, timeout=60)
-    except subprocess.TimeoutExpired:
-        raise WatchError(f'GitHub request timed out: {endpoint}') from None
-    if result.returncode:
-        detail = diagnostic(result.stderr)
-        raise WatchError(f'GitHub request failed: {endpoint} (gh exit {result.returncode})'
-                         + (f': {detail}' if detail else ''))
-    try:
-        return parse_json(result.stdout)
-    except (ValueError, TypeError):
-        raise WatchError(f'malformed JSON from GitHub: {endpoint}') from None
-
-
-def require(value, kind, label, nullable=False):
-    if nullable and value is None:
-        return value
-    if type(value) is not kind:
-        raise WatchError(f'invalid response shape: {label}')
-    return value
-
-
-def field(obj, key, kind, nullable=False):
-    require(obj, dict, 'object')
-    if key not in obj:
-        raise WatchError(f'invalid response shape: missing {key}')
-    return require(obj[key], kind, key, nullable)
-
-
-def selected(obj, schema):
-    return {key: field(obj, key, kind, nullable) for key, kind, nullable in schema}
-
-
-def author(obj):
-    user = field(obj, 'user', dict, nullable=True)
-    return None if user is None else field(user, 'login', str)
 
 
 def comment(obj, inline=False):
@@ -171,22 +114,6 @@ def status(obj):
     return selected(obj, [('id', int, False), ('context', str, False), ('state', str, False),
                           ('description', str, True), ('target_url', str, True),
                           ('created_at', str, False), ('updated_at', str, False)])
-
-
-def items(endpoint, normalize, check_runs=False):
-    pages = require(request(endpoint + ('&' if '?' in endpoint else '?') + 'per_page=100',
-                            paginated=True), list, 'pages')
-    if not pages:
-        raise WatchError('invalid response shape: no pages')
-    result = []
-    for page in pages:
-        if check_runs:
-            total = field(page, 'total_count', int)
-            if total < 0:
-                raise WatchError('invalid response shape: negative check total')
-            page = field(page, 'check_runs', list)
-        result.extend(normalize(item) for item in require(page, list, 'list page'))
-    return sorted(result, key=lambda item: json.dumps(item, sort_keys=True))
 
 
 def snapshot(repo, pr):

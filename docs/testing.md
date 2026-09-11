@@ -33,6 +33,40 @@
   and a newly recreated `.codex-plugin/plugin.json` (exit 1 each).
 - **Live cross-harness model verification:** not performed.
 
+## Review-reader and triage checks
+
+Added 2026-09-11: two read-only tools join the watcher —
+`roborev-review.sh` (reads the roborev combined-review comment for one pull
+request) and `stale-prs.sh` (lists open pull requests idle beyond a cutoff
+with each review state). Shared request, redaction, shape-validation, and
+pagination behavior moved into `references/github_read.py`; the watcher's 34
+tests stayed green through that extraction with no behavior change (the
+sorted-list normalization moved with `items()` and is still asserted by the
+watcher's order tests).
+
+```bash
+python3 -m unittest discover -s tests -p 'test_roborev_review.py' -v
+python3 -m unittest discover -s tests -p 'test_stale_prs.py' -v
+```
+
+Coverage (19 reader, 17 triage; full default discovery is now 78 tests —
+34 watcher, 19 reader, 17 triage, 8 packaging/wrapper): states
+`current`/`stale`/`review-failed`/`unparsed`/`none`, latest-comment selection
+among several, severity and verdict heuristics, draft filtering, cutoff and
+oldest-first ordering, JSON output, pagination of both list endpoints, secret
+redaction in diagnostics, and operational failures that emit no partial
+stdout. The verdict-fallback test was verified to fail with the fallback
+removed, not just to pass.
+
+Live read-only smoke (2026-09-11, authenticated `gh`): `stale-prs.sh` against
+`prime-radiant-inc/evener` listed 11 non-draft pull requests idle over six
+hours, and `roborev-review.sh` against PRs 593, 628, 1022, and 1123 reported
+states matching a manual reading of the same comments
+(current/review-failed/current/current). The smoke also exposed that recent
+combined reviews carry a `**Verdict:**` sentence rather than severity markers,
+which motivated the verdict hint. Live observations are narrow authenticated
+reads, not a claim about GitHub availability or roborev's own behavior.
+
 ## Application scenario and scoring
 
 Supply the fresh agent with the installed skill and this situation:

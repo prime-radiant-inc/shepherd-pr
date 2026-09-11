@@ -63,6 +63,29 @@ done
 
 Five observations, four pauses, plus API time; this is not a wall-clock deadline.
 
+### Reviews and stale pull requests
+
+Two more bundled read-only tools share the watcher's conventions: explicit
+repository, paginated reads, redacted diagnostics, exit 0 success /
+1 operational failure / 2 usage error. Read `--help` for details.
+
+```bash
+# Read one PR's roborev combined review (the bot edits one comment in place).
+bash /path/to/skills/shepherd-pr/references/roborev-review.sh --repo example/widgets --pr 42
+
+# List open PRs with no update in N hours; drafts are excluded unless asked.
+bash /path/to/skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
+```
+
+The reader prints a ROBOREV summary line — head, reviewed commit, state
+(`current`, `stale`, `review-failed`, `unparsed`, or `none`), and a severity
+or verdict hint — followed by the full review body. RoboRev edits its
+combined comment in place, so the reviewed SHA in that comment's header, not
+the comment identity, says whether the review is current. The triage tool
+prints a STALEPR header plus one tab-separated row per pull request, oldest
+first, or JSON with `--json`. Severity counts and verdict text are hints over
+untrusted content; read the review body before acting on any finding.
+
 ## Triage and verify
 
 1. **CI:** reproduce the underlying failing job locally using discovered
@@ -74,7 +97,8 @@ Five observations, four pauses, plus API time; this is not a wall-clock deadline
    tip. Validate each claim against reviewed code and current fixes; record
    file/line evidence and batch valid findings with regression tests.
    Optional RoboRev edits its combined comment in place; compare its body
-   and `Combined Review` SHA, not just comment ID.
+   and `Combined Review` SHA, not just comment ID. The bundled
+   `references/roborev-review.sh` performs exactly that comparison.
 3. **Divergence:** check conflicts and base advancement. Obtain needed
    permission before rebasing, force-pushing, or retriggering CI. Missing
    runs are not permission for empty commits or close/reopen cycles.
