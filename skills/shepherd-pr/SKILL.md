@@ -78,7 +78,7 @@ bash /path/to/skills/shepherd-pr/references/stale-prs.sh --repo example/widgets 
 ```
 
 The reader prints a ROBOREV summary line — head, reviewed commit, state
-(`current`, `stale`, `review-failed`, `unparsed`, or `none`), and a severity
+(`passed`, `current`, `stale`, `review-failed`, `unparsed`, or `none`), and a severity
 or verdict hint — followed by the full review body. RoboRev edits its
 combined comment in place, so the reviewed SHA in that comment's header, not
 the comment identity, says whether the review is current. The triage tool

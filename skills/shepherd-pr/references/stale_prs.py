@@ -28,11 +28,12 @@ python3 (standard library), on macOS or Linux.
 
 Lists open pull requests whose most recent update is older than --hours
 (default 6), oldest first, excluding drafts unless --include-drafts is given.
-For each, it reads the roborev combined-review comment and reports whether the
-reviewed commit is still the head (current), the head moved after review
-(stale), roborev could not complete a review (review-failed), a roborev comment
-exists without a recognized header (unparsed), or no roborev comment exists
-(none). The review-hint column counts `**Severity**` markers, or, when there are
+For each, it reads the roborev combined-review comment and reports the review
+state for each: passed (a review of the current head found no issues),
+current (reviewed commit equals the head), stale (the head moved after
+review), review-failed (a review could not complete), unparsed (a roborev
+comment exists without a recognized header), or none (no roborev comment
+exists). The review-hint column counts `**Severity**` markers, or, when there are
 none, shows the bot's own `**Verdict:**` sentence. Both are hints; read the
 review body before acting.
 

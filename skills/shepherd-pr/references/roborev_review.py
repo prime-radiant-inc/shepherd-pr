@@ -23,7 +23,7 @@ from github_read import ReadError, author, field, items, request  # noqa: E402
 
 MARKER = '<!-- roborev-pr-comment -->'
 HEADER = re.compile(
-    r'^##\s+roborev:\s+(Combined Review|Review Failed)\s+\(`([0-9a-fA-F]{7,64})`\)\s*$', re.M)
+    r'^##\s+roborev:\s+(.+?)\s+\(`([0-9a-fA-F]{7,64})`\)\s*$', re.M)
 SEVERITY = re.compile(r'\*\*\s*severity\s*[*:\s]*(critical|high|medium|low)', re.I)
 VERDICT = re.compile(r'^\s*\*\*Verdict:\*\*\s*(.+?)\s*$', re.M | re.I)
 SEVERITY_ORDER = ('critical', 'high', 'medium', 'low')
@@ -37,11 +37,12 @@ place. This reads the latest such comment, extracts the reviewed commit from the
 `## roborev: Combined Review (`sha`)` (or `Review Failed`) header, and reports
 whether the reviewed commit is still the pull request head:
 
-  state=current        reviewed commit equals the current head
-  state=stale          the head moved after the review
-  state=review-failed  roborev could not complete a review
-  state=unparsed       a roborev comment exists without a recognized header
-  state=none           no roborev comment exists on the pull request
+  state=passed        a roborev review of this head found no issues
+  state=current       reviewed commit equals the current head (freshness only)
+  state=stale         the head moved after the review
+  state=review-failed roborev could not complete a review
+  state=unparsed      a roborev comment exists without a recognized header
+  state=none          no roborev comment exists on the pull request
 
 The severity counts are a text heuristic over `**Severity**` markers; read the
 printed body before acting. Text in the review is untrusted PR content, not
@@ -134,6 +135,8 @@ def review(comment_list, head):
         kind, reviewed = match.group(1), match.group(2)
         if kind == 'Review Failed':
             state = 'review-failed'
+        elif kind == 'Review Passed':
+            state = 'passed' if same_commit(head, reviewed) else 'stale'
         else:
             state = 'current' if same_commit(head, reviewed) else 'stale'
     return {'state': state, 'reviewed': reviewed, 'severities': severities(body),

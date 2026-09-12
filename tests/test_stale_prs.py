@@ -156,12 +156,16 @@ class StalePrTests(unittest.TestCase):
         }
         self.add_pull(pull(500, ts(-20)))
         self.add_pull(pull(700, ts(-7)))
+        self.add_pull(pull(800, ts(-8)))
         self.data['comments']['700'] = [review_comment(review_body(kind='Review Failed',
                                                                    sha=head_sha(700)[:12]))]
+        self.data['comments']['800'] = [review_comment(review_body(kind='Review Passed',
+                                                                   sha=head_sha(800)[:12]))]
         result = self.run_tool('--hours', '6')
         states = {line.split('\t')[0]: line.split('\t')[2]
                   for line in result.stdout.splitlines()[1:]}
-        self.assertEqual(states, {'500': 'none', '593': 'current', '700': 'review-failed'})
+        self.assertEqual(states, {'500': 'none', '593': 'current', '700': 'review-failed',
+                                  '800': 'passed'})
 
     def test_stale_review_state(self):
         self.data['comments']['593'] = [review_comment(review_body(sha='b' * 12))]
