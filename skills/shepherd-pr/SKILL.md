@@ -28,40 +28,38 @@ Use the bundled [watcher](references/pr-watch.sh), with its adjacent
 installed directory. Read `--help` for dependencies, state and exit statuses.
 
 ```bash
+# One observation.
 bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42
+
+# A bounded batch: at most nine observations, 90 seconds apart, stopping at the
+# first change.
+bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
+  --count 9 --interval 90
 ```
 
-This performs **one observation**, not a persistent watch. First success
-arms a baseline; subsequent complete observations report no change or
-`PRWATCH change detected` plus a snapshot. Inspect the initial state too.
-Errors exit nonzero and preserve the last valid baseline; report them.
+One process performs the batch, so you supply no loop. `--count` is the
+observation budget (1-1000, default 1) and `--interval` the seconds between
+observations (1-86400, default 120); the process exits when the budget is
+exhausted or a change is detected, and it is not a persistent watch. First
+success arms a baseline; each later observation reports `PRWATCH no change` or
+`PRWATCH change detected` plus a snapshot. A batch stops at the first change and
+prints `PRWATCH monitor complete` only when it finishes unchanged. Inspect the
+initial state too. Errors exit nonzero, abort the batch, and preserve the last
+valid baseline; report them.
 
-Choose only capabilities actually available:
+Agree the observation budget and cadence with the user (for example, `--count 5
+--interval 120`); stop the job at the limit or outcome. CI progress also consumes
+change notifications. No goal tool is required. Never claim monitoring survives
+job completion or the harness session.
 
-| Capability | Finite monitoring pattern |
+Run the batch as a background job and use the wakeup your harness actually
+supports; do not invent tools:
+
+| Capability | Monitoring pattern |
 | --- | --- |
-| Output-match wakeups | Schedule bounded invocations; match `PRWATCH change detected`. Evener's `job_watch` is optional. |
-| Background completion notifications | Run a finite observation batch; inspect output when it completes. |
-| Neither | Invoke once, report state and the need for another observation. |
-
-Agree an observation budget/cadence (for example, five observations spaced
-120 seconds apart); stop jobs/watches at the limit or outcome. CI progress
-also consumes change notifications. No goal tool is required. Never claim
-monitoring survives job completion or the harness session.
-
-### Finite shell example
-
-Run with **Bash** from the installed `shepherd-pr` skill directory; replace
-these illustrative repository/PR values with the authorized target:
-
-```bash
-for ((i=1; i<=5; i++)); do
-  bash references/pr-watch.sh --repo example/widgets --pr 42 || exit "$?"
-  if ((i<5)); then sleep 120; fi
-done
-```
-
-Five observations, four pauses, plus API time; this is not a wall-clock deadline.
+| Output-match wakeups | Run the batch as a background job; wake on the literal `PRWATCH change detected` in its output and also handle its completion and errors. Evener's optional example: `job_watch` with `output_match`. |
+| Background completion notifications | Run the batch as a background job; inspect its output when it completes. |
+| Neither | Run one observation, report state, and name the need for another observation. |
 
 ### Reviews and stale pull requests
 
