@@ -67,6 +67,34 @@ combined reviews carry a `**Verdict:**` sentence rather than severity markers,
 which motivated the verdict hint. Live observations are narrow authenticated
 reads, not a claim about GitHub availability or roborev's own behavior.
 
+## Bounded batch watcher mode (2026-09-12)
+
+`pr-watch.sh` now takes `--count N` (1-1000, default 1) and `--interval SECONDS`
+(1-86400, default 120). One process performs up to `N` observations, waits
+between them, and exits at the first `PRWATCH change detected` or when the budget
+is exhausted; an unchanged multi-observation batch prints `PRWATCH monitor
+complete`. The state lock covers each observation, not the pause, so a concurrent
+one-shot is not blocked. This replaces the hand-written Bash `for` loop the skill
+previously recommended, and the skill/README now describe running the batch as a
+background job with output-match or completion wakeups. `--count 1` preserves the
+original one-observation output and exit statuses.
+
+Six new watcher regressions cover `--count`/`--interval` boundary and duplicate
+validation (exit 2); an unchanged batch with the completion marker; a first
+observation that arms and is followed by no-change observations; early stop at
+the first change without waiting out the interval; an operational failure that
+aborts once and preserves the baseline; and a concurrent one-shot completing
+while a batch sleeps, proving the lock is released.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_pr_watch.py' -v
+```
+
+Full default discovery is now **85 tests** (40 watcher, 20 reader, 17 triage,
+8 packaging), all passing with shell syntax and `git diff --check` clean. These
+are deterministic GitHub-CLI-boundary fixtures; no live GitHub or cross-harness
+model run was repeated.
+
 ## Application scenario and scoring
 
 Supply the fresh agent with the installed skill and this situation:

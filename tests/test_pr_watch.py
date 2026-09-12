@@ -9,6 +9,7 @@ import stat
 import runpy
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,6 +139,15 @@ class WatcherTests(unittest.TestCase):
                                '--state-dir', str(self.state), *args],
                               env=self.env, cwd=self.directory, text=True, capture_output=True, timeout=15)
 
+    def launch_watcher(self, *args):
+        self.fixture.write_text(json.dumps(self.data))
+        if not self.state.exists() and not self.state.is_symlink():
+            self.state.mkdir(mode=0o700, exist_ok=True)
+        return subprocess.Popen(['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
+                                 '--state-dir', str(self.state), *args],
+                                env=self.env, cwd=self.directory, text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
     def baseline(self):
         files = [p for p in self.state.iterdir() if p.suffix == '.json' or p.name == 'source-baseline']
         self.assertEqual(len(files), 1, files)
@@ -166,7 +176,8 @@ class WatcherTests(unittest.TestCase):
         help_result = subprocess.run(['bash', str(SCRIPT), '--help'], env=self.env,
                                      text=True, capture_output=True, timeout=15)
         self.assert_success(help_result, '--repo OWNER/REPO')
-        for term in ('--pr NUMBER', '--state-dir DIR', 'python3', 'gh', '0', '1', '2', 'poll', 'cleanup'):
+        for term in ('--pr NUMBER', '--state-dir DIR', '--count N', '--interval SECONDS',
+                     'python3', 'gh', '0', '1', '2', 'poll', 'cleanup', 'batch'):
             self.assertIn(term, help_result.stdout)
         for args in ([], ['--repo', 'owner/repo'], ['--repo', '../repo', '--pr', '1'],
                      ['--repo', 'owner/repo', '--pr', '0'], ['--repo', 'owner/repo', '--pr', '-2'],
@@ -179,6 +190,73 @@ class WatcherTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn('usage', result.stderr.lower())
         self.assertFalse(self.state.exists())
+
+    def test_batch_usage_validation(self):
+        for args in (['--count', '0'], ['--count', '-1'], ['--count', 'x'],
+                     ['--count', '1001'], ['--interval', '0'], ['--interval', '-1'],
+                     ['--interval', 'abc'], ['--interval', '86401'],
+                     ['--count', '2', '--count', '3'], ['--interval', '5', '--interval', '6']):
+            with self.subTest(args=args):
+                result = self.run_watcher(*args)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertIn('usage', result.stderr.lower())
+
+    def test_batch_finishes_unchanged_with_completion_marker(self):
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        result = self.run_watcher('--count', '3', '--interval', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout.count('PRWATCH no change'), 3, result.stdout)
+        self.assertIn('PRWATCH monitor complete', result.stdout)
+        self.assertNotIn('PRWATCH change detected', result.stdout)
+
+    def test_batch_arms_on_first_observation(self):
+        result = self.run_watcher('--count', '3', '--interval', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(result.stdout.count('PRWATCH armed'), 1, result.stdout)
+        self.assertEqual(result.stdout.count('PRWATCH no change'), 2, result.stdout)
+        self.assertIn('PRWATCH monitor complete', result.stdout)
+
+    def test_batch_stops_at_first_change(self):
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        self.data['issue_comments'][0]['body'] = 'changed while monitoring'
+        # A long interval proves the batch stops at the change instead of waiting.
+        started = time.monotonic()
+        result = self.run_watcher('--count', '9', '--interval', '60')
+        elapsed = time.monotonic() - started
+        self.assert_success(result, 'PRWATCH change detected')
+        self.assertEqual(result.stdout.count('PRWATCH change detected'), 1, result.stdout)
+        self.assertNotIn('PRWATCH monitor complete', result.stdout)
+        self.assertEqual(json.loads(result.stdout.split('\n', 1)[1]),
+                         json.loads(self.baseline().read_bytes()))
+        self.assertLess(elapsed, 10.0)
+
+    def test_batch_operational_failure_aborts(self):
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        before = self.baseline().read_bytes()
+        self.data['fail'] = 'reviews'
+        result = self.run_watcher('--count', '3', '--interval', '1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.count('PRWATCH error'), 1, result.stderr)
+        self.assertNotIn('PRWATCH no change', result.stdout)
+        self.assertEqual(self.baseline().read_bytes(), before)
+
+    def test_batch_releases_the_lock_while_sleeping(self):
+        self.assert_success(self.run_watcher(), 'PRWATCH armed')
+        batch = self.launch_watcher('--count', '2', '--interval', '5')
+        try:
+            self.assertIn('PRWATCH no change', batch.stdout.readline())
+            # The batch is now sleeping; a separate observation must not block
+            # on a lock the batch is holding across the pause.
+            started = time.monotonic()
+            result = self.run_watcher()
+            elapsed = time.monotonic() - started
+            self.assert_success(result, 'PRWATCH no change')
+            self.assertLess(elapsed, 3.0, 'batch must not hold the lock while sleeping')
+        finally:
+            batch.terminate()
+            batch.communicate(timeout=15)
 
     def test_first_unchanged_and_complete_snapshot(self):
         self.assert_success(self.run_watcher(), 'PRWATCH armed')
