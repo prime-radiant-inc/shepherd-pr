@@ -132,6 +132,13 @@ class RoborevReaderTests(unittest.TestCase):
         self.assertIn(f'reviewed={HEAD[:12]}', self.summary(result))
         self.assertIn('findings here', result.stdout)
 
+    def test_review_passed(self):
+        self.data['issue_comments'] = [comment(roborev_body(kind='Review Passed'))]
+        result = self.run_reader()
+        self.assert_success(result, 'passed')
+        self.assertIn(f'reviewed={HEAD[:12]}', self.summary(result))
+        self.assertIn('findings here', result.stdout)
+
     def test_stale_review(self):
         self.data['issue_comments'] = [comment(roborev_body(sha='b' * 12))]
         result = self.run_reader()

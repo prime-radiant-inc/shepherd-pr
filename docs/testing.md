@@ -51,7 +51,7 @@ python3 -m unittest discover -s tests -p 'test_stale_prs.py' -v
 
 Coverage (19 reader, 17 triage; full default discovery is now 78 tests —
 34 watcher, 19 reader, 17 triage, 8 packaging/wrapper): states
-`current`/`stale`/`review-failed`/`unparsed`/`none`, latest-comment selection
+`passed`/`current`/`stale`/`review-failed`/`unparsed`/`none`, latest-comment selection
 among several, severity and verdict heuristics, draft filtering, cutoff and
 oldest-first ordering, JSON output, pagination of both list endpoints, secret
 redaction in diagnostics, and operational failures that emit no partial

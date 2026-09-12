@@ -142,9 +142,10 @@ bash skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
 
 `roborev-review.sh` reads a pull request's roborev combined-review comment —
 RoboRev edits one comment in place rather than posting new ones — and reports
-whether the reviewed commit is still the head: `current`, `stale` (the head
-moved after the review), `review-failed` (a review could not complete),
-`unparsed`, or `none`. It prints one ROBOREV summary line and the full review
+the review state: `passed` (a review of the current head found no issues),
+`current` (reviewed commit equals the head), `stale` (the head moved after
+the review), `review-failed` (a review could not complete), `unparsed`, or
+`none`. It prints one ROBOREV summary line and the full review
 body.
 
 `stale-prs.sh` lists open pull requests whose last update is older than
