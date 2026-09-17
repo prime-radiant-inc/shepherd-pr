@@ -1,6 +1,6 @@
 {
   "name": "shepherd-pr",
   "description": "Shepherd GitHub pull requests through CI and review.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "contextFileName": "GEMINI.md"
 }
