@@ -40,8 +40,10 @@ asking:
   transition.
 - The settle detector [pr-settle.sh](references/pr-settle.sh), with its
   adjacent [Python helper](references/pr_settle.py), answers “tell me when this
-  PR is finished waiting” — head unchanged, no check outstanding, and
-  roborev's combined review written for that exact head.
+  PR is finished waiting” — head unchanged, no check outstanding (the *current*
+  run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
+  superseded history), and roborev's combined review written for that exact
+  head.
 
 When the wait is on CI plus a review for a known head, prefer the settle
 detector: it prints one short line per state-class change and a final settled

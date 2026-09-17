@@ -156,11 +156,16 @@ bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
 ```
 
-Settled means the head still equals `--head`, no check is outstanding (every
-check run completed with SUCCESS/NEUTRAL/SKIPPED and every commit status
-SUCCESS/NEUTRAL), and roborev's combined review names that exact head. Settled
-does not mean the review is clean: roborev's green commit status can coexist
-with a comment full of findings, so the settled line reports the review's
+Settled means the head still equals `--head`, no check is outstanding, and
+roborev's combined review names that exact head. "Outstanding" is judged on the
+current run of each check name and the current state of each commit-status
+context: a check run is outstanding unless it is COMPLETED with SUCCESS, NEUTRAL
+or SKIPPED, and a commit status unless it is SUCCESS or NEUTRAL.
+`statusCheckRollup` keeps superseded history, so a name with a newer run is
+judged by that newer run rather than by any older CANCELLED or FAILURE entry,
+exactly as `gh pr checks` reports it. Settled does not mean the review is
+clean: roborev's green commit status can coexist with a comment full of
+findings, so the settled line reports the review's
 severity/verdict hint and the separate `roborev_check` context. Prefer this tool
 when the wait is on CI plus a review for a known head; use the watcher when any
 change must be seen. The settle detector keeps no state directory.

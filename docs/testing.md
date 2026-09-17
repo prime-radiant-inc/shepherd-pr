@@ -312,15 +312,29 @@ and it reports roborev's own passing commit status separately as
 python3 -m unittest discover -s tests -p 'test_pr_settle.py' -v
 ```
 
+Update (2026-09-17, superseded-run fix): `statusCheckRollup` retains history, so
+a check name can carry a superseded CANCELLED entry beside the newer run's
+SUCCESS and the per-entry predicate wedged a green head. The predicate now
+reduces the rollup to the newest entry per check name (largest check-run `id`,
+else newest `startedAt`) before applying the documented conclusion rule. A live
+read-only run against `prime-radiant-inc/evener` PR 1607 at head
+`7c9c065884341d8baec6aa67d6d32c1a9c83bcdb` (31 rollup entries: 16 current runs,
+all green, plus the superseded run's CANCELLED/FAILURE history) now reports
+`checks=green` and exits 0; the pre-fix helper exited 1 with that head green.
+
 Coverage: the outstanding-check predicate for check runs (in-progress, queued,
 failed, cancelled, timed-out) and commit-status rows that carry `state` with a
-null `conclusion` (the `gh pr view` trap), accepted SUCCESS/NEUTRAL/SKIPPED
-conclusions, the settled condition, a head that moves under the wait, stale and
-absent reviews, a roborev `Review Failed` comment for the head, findings that
+null `conclusion` (the `gh pr view` trap), a superseded CANCELLED entry yielding
+to the newer run for its name (both list orders, and by `startedAt` when gh
+omits the id), the newest FAILURE and newest IN_PROGRESS runs still reported
+outstanding, a superseded commit-status context judged by its newest state, a
+name left with only historical entries terminating with a definite report,
+accepted SUCCESS/NEUTRAL/SKIPPED conclusions, the settled condition, a head that
+moves under the wait, stale and absent reviews, a roborev `Review Failed` comment for the head, findings that
 settle but are reported rather than hidden, a null rollup, one state line per
 unchanged batch, `--count`/`--interval` validation, and operational failures
-with redacted diagnostics. Full default discovery is now **107 tests**
-(40 watcher, 20 reader, 17 triage, 22 settle, 8 packaging), all passing. These
+with redacted diagnostics. Full default discovery is now **113 tests**
+(40 watcher, 20 reader, 17 triage, 28 settle, 8 packaging), all passing. These
 are deterministic GitHub-CLI-boundary fixtures; no live GitHub call is made by
 the suite. A live read-only smoke against `prime-radiant-inc/evener` PR 1607
 settled at head `10d193172f5445995e322093eafc90c0845098b0` with `checks=green`,

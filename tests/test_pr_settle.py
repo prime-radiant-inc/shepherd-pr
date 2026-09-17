@@ -61,14 +61,25 @@ HEAD = 'a' * 40
 OTHER = 'b' * 40
 
 
-def run_check(name='tests', status='COMPLETED', conclusion='SUCCESS'):
-    return {'name': name, 'context': None, 'status': status,
-            'conclusion': conclusion, 'state': None, '__typename': 'CheckRun'}
+def run_check(name='tests', status='COMPLETED', conclusion='SUCCESS',
+              ident=None, started=None):
+    entry = {'name': name, 'context': None, 'status': status,
+             'conclusion': conclusion, 'state': None, '__typename': 'CheckRun'}
+    if ident is not None:
+        entry['id'] = ident
+    if started is not None:
+        entry['startedAt'] = started
+    return entry
 
 
-def commit_status(context='roborev', state='SUCCESS'):
-    return {'name': None, 'context': context, 'status': None,
-            'conclusion': None, 'state': state, '__typename': 'StatusContext'}
+def commit_status(context='roborev', state='SUCCESS', ident=None, started=None):
+    entry = {'name': None, 'context': context, 'status': None,
+             'conclusion': None, 'state': state, '__typename': 'StatusContext'}
+    if ident is not None:
+        entry['id'] = ident
+    if started is not None:
+        entry['startedAt'] = started
+    return entry
 
 
 def roborev_comment(kind='Combined Review', sha=HEAD[:12], extra=''):
@@ -157,6 +168,94 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('checks=outstanding:build', result.stdout)
         self.assertIn('PRSETTLE timeout', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+
+    def test_superseded_cancelled_entry_yields_to_a_newer_check_run(self):
+        # statusCheckRollup keeps history: a superseded run leaves CANCELLED
+        # entries that share a name with the newer run's SUCCESS. gh pr checks
+        # reports the current run per name; the tool must do the same instead
+        # of treating every historical entry as a current one.
+        superseded = run_check('tests', 'COMPLETED', 'CANCELLED',
+                               ident=100, started='2026-09-17T18:19:04Z')
+        current = run_check('tests', 'COMPLETED', 'SUCCESS',
+                            ident=200, started='2026-09-17T18:19:15Z')
+        for rollup in ([superseded, current], [current, superseded]):
+            with self.subTest(first=rollup[0]['conclusion']):
+                self.data['rollup'] = [*rollup, commit_status('roborev', 'SUCCESS')]
+                result = self.run_tool()
+                self.assert_settled(result)
+                self.assertIn('checks=green', result.stdout)
+
+    def test_newest_run_wins_by_start_time_when_no_id_is_emitted(self):
+        # gh pr view does not emit a check-run id, so startedAt is the ordering
+        # fallback. The superseded entry is listed second and must still lose.
+        superseded = run_check('native', 'COMPLETED', 'CANCELLED',
+                               started='2026-09-17T18:19:04Z')
+        current = run_check('native', 'COMPLETED', 'SUCCESS',
+                            started='2026-09-17T18:19:15Z')
+        self.data['rollup'] = [current, superseded, commit_status('roborev', 'SUCCESS')]
+        self.assert_settled(self.run_tool())
+
+    def test_newest_failure_remains_outstanding(self):
+        # A fix that ignores failures wholesale would wrongly settle here: the
+        # newest run for the name is the failing one.
+        older = run_check('static', 'COMPLETED', 'SUCCESS',
+                          ident=100, started='2026-09-17T18:19:04Z')
+        newest = run_check('static', 'COMPLETED', 'FAILURE',
+                           ident=200, started='2026-09-17T18:27:29Z')
+        self.data['rollup'] = [older, newest, commit_status('roborev', 'SUCCESS')]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('checks=outstanding:static', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+
+    def test_newest_in_progress_remains_outstanding(self):
+        older = run_check('tests', 'COMPLETED', 'SUCCESS',
+                          ident=100, started='2026-09-17T18:19:04Z')
+        newest = run_check('tests', 'IN_PROGRESS', None,
+                           ident=200, started='2026-09-17T18:19:15Z')
+        self.data['rollup'] = [older, newest, commit_status('roborev', 'SUCCESS')]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('checks=outstanding:tests', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+
+    def test_superseded_commit_status_context_is_judged_by_its_newest_state(self):
+        # The trap: a commit status row carries state with a null conclusion,
+        # and a context can carry history too. The newest state per context
+        # decides, read through `.conclusion // .state // .status`.
+        self.data['rollup'] = [
+            commit_status('external', 'FAILURE', started='2026-09-17T18:19:04Z'),
+            commit_status('external', 'SUCCESS', started='2026-09-17T18:19:15Z'),
+            run_check('tests'), commit_status('roborev', 'SUCCESS')]
+        self.assert_settled(self.run_tool())
+        self.data['rollup'] = [
+            commit_status('external', 'SUCCESS', started='2026-09-17T18:19:04Z'),
+            commit_status('external', 'PENDING', started='2026-09-17T18:19:15Z'),
+            run_check('tests'), commit_status('roborev', 'SUCCESS')]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('checks=outstanding:external', result.stdout)
+
+    def test_only_historical_entries_do_not_wedge_the_tool(self):
+        # A job cancelled in the superseded run that never re-ran leaves one
+        # CANCELLED entry and no newer run for its name. The newest entry for
+        # that name is still the CANCELLED one, so the documented rule keeps it
+        # outstanding rather than ignoring cancelled runs wholesale; "not
+        # wedged" here means the tool must terminate at its budget with a
+        # definite report instead of crashing or spinning.
+        self.data['rollup'] = [
+            run_check('tests', 'COMPLETED', 'SUCCESS', ident=200,
+                      started='2026-09-17T18:19:15Z'),
+            run_check('retired', 'COMPLETED', 'CANCELLED', ident=100,
+                      started='2026-09-17T18:19:05Z'),
+            commit_status('roborev', 'SUCCESS')]
+        result = self.run_tool('--count', '2', '--interval', '1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, '')
+        self.assertIn('checks=outstanding:retired', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE state'), 1, result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE timeout'), 1, result.stdout)
         self.assertNotIn('PRSETTLE settled', result.stdout)
 
     def test_in_progress_and_failed_check_runs_are_outstanding(self):
