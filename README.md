@@ -2,8 +2,8 @@
 
 A portable coding-agent skill for taking a GitHub pull request through CI
 and review to an **authorized merge**, or reporting an evidenced blocker.
-Includes read-only review-reading, stale-PR triage, and change-watching tools;
-no hosted service or automatic approval.
+Includes read-only change-watching, settle-detection, review-reading, and
+stale-PR triage tools; no hosted service or automatic approval.
 
 ## Installation
 
@@ -47,8 +47,9 @@ Ask your agent to use `shepherd-pr`, for example:
 
 The [skill reference](skills/shepherd-pr/SKILL.md) is also readable directly.
 Keep the entire skill directory together: the bundled tools require their
-adjacent Python helpers (`references/pr_watch.py`, `roborev_review.py`,
-`stale_prs.py`, `github_read.py`), not just the shell files.
+adjacent Python helpers (`references/pr_watch.py`, `pr_settle.py`,
+`roborev_review.py`, `stale_prs.py`, `github_read.py`), not just the
+shell files.
 
 ## Prerequisites
 
@@ -140,6 +141,29 @@ helper, restore the full skill directory rather than rewriting the watcher.
 
 For cleanup, stop **all** invocations first, then remove the private state
 directory you selected. This resets baselines. Never delete a live lock.
+
+### Settle detection
+
+`pr-settle.sh` answers a different question from the change watcher: not "what
+changed?" but "is this pull request finished waiting?" It polls one PR for a
+bounded `--count`/`--interval` (same flags as the watcher) and prints a short
+`PRSETTLE state` line only when the state class changes, then a final line. It
+exits 0 when settled and 1 on timeout or operational failure.
+
+```bash
+head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
+bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+  --head "$head" --count 40 --interval 60
+```
+
+Settled means the head still equals `--head`, no check is outstanding (every
+check run completed with SUCCESS/NEUTRAL/SKIPPED and every commit status
+SUCCESS/NEUTRAL), and roborev's combined review names that exact head. Settled
+does not mean the review is clean: roborev's green commit status can coexist
+with a comment full of findings, so the settled line reports the review's
+severity/verdict hint and the separate `roborev_check` context. Prefer this tool
+when the wait is on CI plus a review for a known head; use the watcher when any
+change must be seen. The settle detector keeps no state directory.
 
 ## Review reading and stale pull-request triage
 

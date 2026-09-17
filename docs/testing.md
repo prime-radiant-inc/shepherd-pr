@@ -294,3 +294,34 @@ Claude/Copilot installs; it was stopped to fix config and regenerate. The
 corrected full run above passed without changing generator/check scripts or
 weakening assertions. Public-URL fetchability, authenticated cross-harness
 model behavior and live merge workflows remain unverified.
+
+## Settle detector (2026-09-17)
+
+`pr-settle.sh` joins the reference tools. It answers "is this pull request
+finished waiting?" rather than "what changed?": a bounded `--count`/`--interval`
+poll prints one short `PRSETTLE state` line only when the state class changes,
+then a final `PRSETTLE settled` line, and exits 0 settled / 1 timeout or
+operational failure / 2 usage error. Settled requires the head still equal
+`--head`, no outstanding check, and roborev's combined review naming that exact
+head; it does not claim the review is clean. The tool reuses
+`roborev_review.py`, so its severity/verdict hint matches `roborev-review.sh`,
+and it reports roborev's own passing commit status separately as
+`roborev_check`.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_pr_settle.py' -v
+```
+
+Coverage: the outstanding-check predicate for check runs (in-progress, queued,
+failed, cancelled, timed-out) and commit-status rows that carry `state` with a
+null `conclusion` (the `gh pr view` trap), accepted SUCCESS/NEUTRAL/SKIPPED
+conclusions, the settled condition, a head that moves under the wait, stale and
+absent reviews, a roborev `Review Failed` comment for the head, findings that
+settle but are reported rather than hidden, a null rollup, one state line per
+unchanged batch, `--count`/`--interval` validation, and operational failures
+with redacted diagnostics. Full default discovery is now **107 tests**
+(40 watcher, 20 reader, 17 triage, 22 settle, 8 packaging), all passing. These
+are deterministic GitHub-CLI-boundary fixtures; no live GitHub call is made by
+the suite. A live read-only smoke against `prime-radiant-inc/evener` PR 1607
+settled at head `10d193172f5445995e322093eafc90c0845098b0` with `checks=green`,
+`roborev=current`, and `roborev_check=SUCCESS`.
