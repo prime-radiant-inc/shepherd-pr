@@ -1,5 +1,5 @@
 name: shepherd-pr
-version: 0.2.0
+version: 0.3.0
 description: Shepherd GitHub pull requests through CI and review.
 license: MIT
 author:
