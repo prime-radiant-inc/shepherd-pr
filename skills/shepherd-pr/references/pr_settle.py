@@ -5,13 +5,17 @@ Answers the question an agent actually waits on -- "is this pull request done
 waiting and ready to judge?" -- instead of streaming the whole PR snapshot on
 every CI change. An observation is settled when the pull request head is still
 the head you asked about, no check is outstanding, and roborev's combined review
-has been written for that exact head. Settled does NOT mean clean: the roborev
+has been written for that exact head. `statusCheckRollup` keeps history, so
+"outstanding" means the *current* run of each check name (and the current commit
+status per context), not every entry GitHub has ever retained for the commit;
+that matches what `gh pr checks` reports. Settled does NOT mean clean: the roborev
 comment may list findings, and roborev's own commit status reports success even
 while it does. The final line carries the head, the check class, roborev's
 review state, and roborev's severity/verdict hint so the caller can decide
 whether to read the full review body.
 """
 import argparse
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
@@ -37,8 +41,12 @@ short lines instead of a full snapshot for every CI transition.
 
 Settled means all three hold:
   * the pull request head still equals --head;
-  * no check is outstanding (every check run is COMPLETED with a conclusion of
-    SUCCESS, NEUTRAL or SKIPPED, and every commit status is SUCCESS or NEUTRAL);
+  * no check is outstanding: the current run of every check name is COMPLETED
+    with a conclusion of SUCCESS, NEUTRAL or SKIPPED, and the current commit
+    status per context is SUCCESS or NEUTRAL. statusCheckRollup keeps history --
+    a superseded CANCELLED or FAILURE entry does not count once a newer run for
+    that name exists -- so a name is judged by the same current run that
+    `gh pr checks` reports;
   * roborev's combined review names that exact head.
 
 Settled does NOT mean the review is clean. roborev edits one combined comment in
@@ -155,14 +163,69 @@ def check_name(entry):
 
 
 def is_outstanding(entry):
-    """A check run is outstanding unless COMPLETED with an accepted conclusion; a
-    commit status is outstanding unless SUCCESS or NEUTRAL. SKIPPED is accepted."""
+    """Applied to the current entry for a name: a check run is outstanding
+    unless COMPLETED with an accepted conclusion; a commit status is outstanding
+    unless SUCCESS or NEUTRAL. SKIPPED is accepted."""
     return effective_state(entry) not in ALLOWED_STATES
 
 
-def roborev_check(entries):
+def identity_number(entry):
+    """The numeric check-run id when gh emits one; ids grow with creation."""
+    ident = entry.get('id')
+    if isinstance(ident, bool):
+        return None
+    if isinstance(ident, int):
+        return ident
+    if isinstance(ident, str) and ident.isdigit():
+        return int(ident)
+    return None
+
+
+def start_time(entry):
+    """The run's start (or else creation) time as an epoch float, or None."""
+    for key in ('startedAt', 'createdAt', 'updatedAt', 'completedAt'):
+        value = entry.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        text = value.strip()
+        if text.endswith('Z'):
+            text = text[:-1] + '+00:00'
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            continue
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.timestamp()
+    return None
+
+
+def run_order(entry):
+    """Order key for one rollup entry: the largest check-run id wins, else the
+    newest start time. gh pr view usually omits the id, so startedAt is the
+    common fallback; compare parsed times, not display strings."""
+    number = identity_number(entry)
+    moment = start_time(entry)
+    return (0 if number is None else 1, number if number is not None else 0,
+            moment if moment is not None else float('-inf'))
+
+
+def latest_entries(entries):
+    """Reduce the rollup to the newest entry per check name. A commit status
+    contributes its context as the name. The superseded history GitHub retains
+    -- several runs can share a name -- must not be judged as current."""
+    latest = {}
     for entry in entries:
-        if 'roborev' in check_name(entry).lower():
+        name = check_name(entry)
+        order = run_order(entry)
+        if name not in latest or order > latest[name][0]:
+            latest[name] = (order, entry)
+    return {name: entry for name, (_, entry) in latest.items()}
+
+
+def roborev_check(entries):
+    for name, entry in latest_entries(entries).items():
+        if 'roborev' in name.lower():
             return effective_state(entry) or '-'
     return '-'
 
@@ -178,7 +241,8 @@ def roborev_state(repo, pr, head):
 
 def observe(args):
     current_head, entries = pull_state(args.repo, args.pr)
-    outstanding = sorted({check_name(entry) for entry in entries if is_outstanding(entry)})
+    current = latest_entries(entries)
+    outstanding = sorted(name for name, entry in current.items() if is_outstanding(entry))
     state, reviewed, severities, verdict = roborev_state(args.repo, args.pr, current_head)
     settled = (current_head == args.head and not outstanding
                and reviewed is not None
