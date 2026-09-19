@@ -148,8 +148,8 @@ commits:
 
 ```bash
 roborev list --open            # unresolved reviews, this repo and branch by default
-roborev show <job-id|sha>      # the full review for one commit or job
-roborev close <job-id>         # mark one resolved
+roborev show 42                # the full review for one job; a commit SHA works too
+roborev close 42               # mark one resolved
 ```
 
 `roborev list` filters to the current repo and branch, so run it in the
