@@ -135,6 +135,35 @@ that check separately as `roborev_check` and never treats it as a verdict.
 Conversely, an agent must not treat a reviewer's passing check as permission
 to merge.
 
+### Per-commit reviews
+
+The combined comment is not the whole review surface. RoboRev also reviews each
+commit on its own, and those per-commit reviews are not posted to the pull
+request — they are reachable only from the checkout that holds the commits. A
+shepherd that reads the combined comment alone can call a round closed while a
+finding against its own commit sits unread.
+
+Sweep them before treating a round as closed, from the worktree holding the
+commits:
+
+```bash
+roborev list --open            # unresolved reviews, this repo and branch by default
+roborev show 42                # the full review for one job; a commit SHA works too
+roborev close 42               # mark one resolved
+```
+
+`roborev list` filters to the current repo and branch, so run it in the
+checkout under review; `--repo` and `--branch` redirect it, and `--status`
+separates a review still `queued` or `running` (no verdict to act on yet) from
+one that is `done`. Judge each finished review the way you judge a
+combined-comment finding: fix it at the root, or refute it with evidence. Close
+a review only when it is genuinely resolved — never blanket-close to empty the
+list — and leave commits that are not yours alone, including another lane's
+branch and any review whose commits fall outside your change.
+
+Like the combined comment, this surface is optional: skip it when the
+repository has no RoboRev.
+
 ## Triage and verify
 
 1. **CI:** reproduce the underlying failing job locally using discovered
