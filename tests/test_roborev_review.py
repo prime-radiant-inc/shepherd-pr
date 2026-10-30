@@ -184,6 +184,40 @@ class RoborevReaderTests(unittest.TestCase):
         result = self.run_reader()
         self.assertIn('verdict=Jesse, this is sound.', self.summary(result))
 
+    def test_severity_headings_count_their_findings(self):
+        body = roborev_body(extra=(
+            '\n### High\n\n- `a.go:1`: Bad.\n\n  **Fix:** Better.\n\n- `b.go:2`: Bad.\n'
+            '\n### Low\n\n- `c.go:3`: Nit.\n'))
+        self.data['issue_comments'] = [comment(body)]
+        result = self.run_reader()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('severities=high:2,low:1', self.summary(result))
+
+    def test_decorated_severity_headings_count(self):
+        for heading in ('### High Severity', '### **High**', '### High (2)', '# High'):
+            with self.subTest(heading=heading):
+                body = roborev_body(extra=f'\n{heading}\n\n- `a.go:1`: Bad.\n')
+                self.data['issue_comments'] = [comment(body)]
+                result = self.run_reader()
+                self.assertIn('severities=high:1', self.summary(result))
+
+    def test_severity_heading_without_list_items_counts_once(self):
+        self.data['issue_comments'] = [comment(roborev_body(extra='\n### Critical\n\nWrong.\n'))]
+        result = self.run_reader()
+        self.assertIn('severities=critical:1', self.summary(result))
+
+    def test_headings_that_only_start_with_a_severity_word_do_not_count(self):
+        body = roborev_body(extra='\n## High-level summary\n\n- Fine.\n\n### Low risk notes\n\n- Fine.\n')
+        self.data['issue_comments'] = [comment(body)]
+        result = self.run_reader()
+        self.assertIn('severities=-', self.summary(result))
+
+    def test_inline_marker_under_a_severity_heading_counts_once(self):
+        body = roborev_body(extra='\n### High\n\n- **Severity:** high `a.go:1`: Bad.\n')
+        self.data['issue_comments'] = [comment(body)]
+        result = self.run_reader()
+        self.assertIn('severities=high:1', self.summary(result))
+
     def test_no_severity_markers_is_dash(self):
         self.data['issue_comments'] = [comment(roborev_body())]
         result = self.run_reader()
