@@ -102,19 +102,19 @@ def same_commit(head, reviewed):
 
 
 def severities(body):
-    counts = {name: 0 for name in SEVERITY_ORDER}
-    headings = list(SEVERITY_HEADING.finditer(body))
-    if not headings:
-        for match in SEVERITY.finditer(body):
-            counts[match.group(1).lower()] += 1
-    for match in headings:
+    inline = {name: 0 for name in SEVERITY_ORDER}
+    headed = {name: 0 for name in SEVERITY_ORDER}
+    for match in SEVERITY.finditer(body):
+        inline[match.group(1).lower()] += 1
+    for match in SEVERITY_HEADING.finditer(body):
         rest = body[match.end():]
         next_heading = ANY_HEADING.search(rest)
         section = rest[:next_heading.start()] if next_heading else rest
         # A heading with no list under it still counts, so a change in how
         # findings are listed cannot hide a severity.
-        counts[match.group(1).lower()] += max(1, len(FINDING.findall(section)))
-    return counts
+        headed[match.group(1).lower()] += max(1, len(FINDING.findall(section)))
+    # One finding can carry both forms, so take the larger count, not the sum.
+    return {name: max(inline[name], headed[name]) for name in SEVERITY_ORDER}
 
 
 def verdict(body):

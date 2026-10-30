@@ -218,6 +218,12 @@ class RoborevReaderTests(unittest.TestCase):
         result = self.run_reader()
         self.assertIn('severities=high:1', self.summary(result))
 
+    def test_inline_high_beside_a_low_heading_keeps_the_high(self):
+        body = roborev_body(extra='\n- **Severity: high** `a.go:1`: Bad.\n\n### Low\n\n- `b.go:2`: Nit.\n')
+        self.data['issue_comments'] = [comment(body)]
+        result = self.run_reader()
+        self.assertIn('severities=high:1,low:1', self.summary(result))
+
     def test_no_severity_markers_is_dash(self):
         self.data['issue_comments'] = [comment(roborev_body())]
         result = self.run_reader()
