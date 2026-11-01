@@ -31,21 +31,25 @@ the checks.
 
 ## Observe
 
-First read the gates this repository actually enforces. Repositories differ:
-some run roborev, some require an approving review, some enqueue merges.
+The settle detector discovers this repository's gates itself. Every invocation
+reads the pull request's base branch and that branch's required checks,
+required approving reviews, merge queue and roborev presence, then prints one
+`PRSETTLE gates` line. Ask for the line alone, before pushing, with:
 
 ```bash
-gh pr view 42 --repo example/widgets --json \
-  state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup
-gh pr checks 42 --repo example/widgets
-gh api repos/example/widgets/branches/main/protection   # required checks, reviews
+bash /path/to/skills/shepherd-pr/references/pr-settle.sh \
+  --repo example/widgets --pr 42 --gates
 ```
 
-`reviewDecision` of `REVIEW_REQUIRED` means a human approval gates the merge;
-an approval from your own account does not satisfy it. A `merge-group-report`
-check or a `merge queue` rule means the merge happens through the queue, not on
-the PR head. `roborev-review.sh` reporting `state=none` while `gh pr checks`
-shows no roborev context means the repository does not run roborev.
+Repositories differ, and the line says how: evener requires an approving review
+and merges through a queue; chao and shepherd-pr run no roborev. Its `next=`
+names the one action left — `wait`, `fix`, `approval`, `enqueue`, `merge`,
+`re-arm` or `done`. `gates=unknown` means branch policy was unreadable; the wait
+still runs, so read the repository's instructions for the missing gate.
+
+`REVIEW_REQUIRED` means a human approval gates the merge, and an approval from
+your own account does not satisfy it. A `merge queue` gate means the merge
+happens in the queue, not on the PR head. Neither is a reason to write a watcher.
 
 Use a bundled read-only observation tool, and pick it by the question you are
 asking:
@@ -59,16 +63,18 @@ asking:
   PR is finished waiting” — head unchanged, no check outstanding (the *current*
   run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
   superseded history), the review gate satisfied, and — where the repository
-  runs roborev — its combined review written for that exact head. It reports
-  the approval decision, merge state and PR state, and it covers the waits
-  agents used to hand-roll:
+  runs roborev — its combined review written for that exact head. `--until auto`,
+  the default, also requires the approving review when the repository requires
+  one. It reports the approval decision, merge state and PR state, and it covers
+  the waits agents used to hand-roll:
 
 | The wait is on | Invocation |
 | --- | --- |
-| CI and the review for a known head | `--count 40 --interval 60` |
-| Someone else's approving review | `--until approved` |
+| CI, review and any required approval for a known head | `--count 40 --interval 60` |
+| Someone else's approving review, on a repository whose policy disagrees | `--until approved` |
 | A merge queue finishing the merge | `--until merged` |
-| CI only, in a repository without roborev | any of the above, or `--no-review` |
+| CI and review only, ignoring approval | `--until settled` |
+| CI only, in a repository without roborev | automatic, or `--no-review` |
 
 When the wait is on CI plus a review for a known head, prefer the settle
 detector: it prints one short line per state-class change and a final settled
@@ -88,7 +94,12 @@ bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets -
 bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
   --count 9 --interval 90
 
-# The standard wait: at most 40 observations, 60 seconds apart.
+# The standard wait: at most 40 observations, 60 seconds apart. The head
+# defaults to the one observed now, so this is the whole command.
+bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+  --count 40 --interval 60
+
+# When another actor might push, pin the head you are judging.
 head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
 bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
@@ -128,7 +139,8 @@ survives job completion or the harness session.
 Do not write your own polling loop, approval watcher or merge-queue watcher.
 The bundled tools cover changes, settlement, approval and the queue; adding a
 shell loop on top multiplies requests, hides failures, and usually outlives the
-round that needed it.
+round that needed it. The watcher's first line carries the same gates summary,
+so even a change watch tells you what the repository requires.
 
 Run the batch as a background job and use the wakeup your harness actually
 supports; do not invent tools:

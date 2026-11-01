@@ -80,7 +80,7 @@ edited bodies are included; unstable list ordering is normalized.
 
 | Output / exit | Meaning |
 | --- | --- |
-| `PRWATCH armed` / 0 | First complete observation saved; not an ongoing service. |
+| `PRWATCH armed` / 0 | First complete observation saved, with the repository's required checks, approvals, merge queue and roborev presence; not an ongoing service. |
 | `PRWATCH no change` / 0 | Observation matches the baseline. |
 | `PRWATCH change detected` + JSON / 0 | Complete state changed; inspect evidence, including edits. |
 | `PRWATCH monitor complete` / 0 | A `--count` batch finished unchanged. |
@@ -150,14 +150,34 @@ changed?" but "is this pull request finished waiting?" It polls one PR for a
 bounded `--count`/`--interval` (same flags as the watcher) and prints a short
 `PRSETTLE state` line only when the state class changes, then a final line.
 
+It discovers the repository's gates itself: on every invocation it reads the
+pull request's base branch and that branch's required status checks, required
+approving reviews, merge queue and roborev presence, then prints one
+`PRSETTLE gates` line. `--gates` prints that line and the current pull-request
+state, then exits without waiting, and does not need `--head`:
+
 ```bash
-head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
-bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
-  --head "$head" --count 40 --interval 60
+bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 --gates
 ```
 
+The line ends in `next=`: `wait`, `fix`, `approval`, `enqueue`, `merge`,
+`re-arm` or `done`. Gate discovery is best-effort; unreadable branch policy
+prints `gates=unknown` and the wait still runs.
+
+```bash
+bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+  --count 40 --interval 60
+```
+
+`--head` defaults to the head seen at the first observation, so the common
+post-push wait needs no SHA lookup. Pin `--head` when someone else may push and
+you want the wait to stop on the replacement.
+
 Settled means the head still equals `--head`, no check is outstanding, the
-review gate is satisfied, and the approval gate is satisfied. "Outstanding" is
+review gate is satisfied, and the approval gate is satisfied. `--until auto`
+(the default) includes the approving review only where the repository requires
+one; `--until settled` ignores approval, `--until approved` requires it, and
+`--until merged` waits for the merge queue. "Outstanding" is
 judged on the current run of each check name and the current state of each
 commit-status context: a check run is outstanding unless it is COMPLETED with
 SUCCESS, NEUTRAL or SKIPPED, and a commit status unless it is SUCCESS or NEUTRAL.

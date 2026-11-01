@@ -25,7 +25,8 @@ if args[:2] == ['pr', 'view']:
         print('{not-json')
         sys.exit(0)
     print(json.dumps({
-        'headRefOid': fixture['head'], 'statusCheckRollup': fixture['rollup'],
+        'headRefOid': fixture['head'], 'baseRefName': fixture.get('base', 'main'),
+        'statusCheckRollup': fixture['rollup'],
         'reviewDecision': fixture.get('review_decision', 'APPROVED'),
         'mergeable': fixture.get('mergeable', 'MERGEABLE'),
         'mergeStateStatus': fixture.get('merge_state', 'CLEAN'),
@@ -36,18 +37,29 @@ endpoint = next((a for a in args if a.startswith('repos/')), '')
 endpoint = endpoint.split('?')[0]
 prefix = 'repos/' + fixture['repo']
 pr = str(fixture['pr'])
-routes = {prefix + '/issues/' + pr + '/comments': 'issue_comments'}
+routes = {
+    prefix + '/issues/' + pr + '/comments': 'issue_comments',
+    prefix + '/branches/' + fixture.get('base', 'main') + '/protection': 'protection',
+    prefix + '/rulesets': 'rulesets',
+    prefix + '/rulesets/1': 'ruleset',
+    prefix: 'repository',
+}
 key = routes.get(endpoint)
 if key is None:
     print('fixture: unknown endpoint ' + endpoint, file=sys.stderr)
     sys.exit(4)
-if fixture.get('fail') == key:
+if key in (fixture.get('fail_many') or []) or fixture.get('fail') == key:
     print('fixture: request denied (HTTP 403) ' + fixture.get('error_detail', ''), file=sys.stderr)
     sys.exit(1)
 if fixture.get('malformed') == key:
     print('{not-json')
     sys.exit(0)
-payload = fixture[key]
+defaults = {'protection': None, 'rulesets': [], 'ruleset': {},
+            'repository': {'default_branch': 'main'}}
+if key == 'protection' and key not in fixture:
+    print('fixture: Branch not protected (HTTP 404)', file=sys.stderr)
+    sys.exit(1)
+payload = fixture[key] if key in fixture else defaults.get(key)
 pages = fixture.get('pages', {}).get(key, [payload])
 if '--paginate' not in args:
     pages = pages[:1]
@@ -117,8 +129,10 @@ class SettleTests(unittest.TestCase):
 
     def run_tool(self, *args, head=HEAD):
         self.fixture.write_text(json.dumps(self.data))
-        return subprocess.run(['bash', str(SCRIPT), '--repo', self.data['repo'],
-                               '--pr', str(self.data['pr']), '--head', head, *args],
+        command = ['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr'])]
+        if head is not None:
+            command += ['--head', head]
+        return subprocess.run([*command, *args],
                               env=self.env, cwd=self.directory, text=True,
                               capture_output=True, timeout=20)
 
@@ -133,11 +147,12 @@ class SettleTests(unittest.TestCase):
                                      text=True, capture_output=True, timeout=15)
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         for term in ('--repo OWNER/REPO', '--pr NUMBER', '--head SHA', '--count N',
-                     '--interval SECONDS', '--until settled|approved|merged',
-                     '--no-review', '--allow-unapproved', 'python3', 'gh', '0', '1', '2',
-                     '3', 'settled', 'timeout', 'roborev', 'clean', 'merge queue'):
+                     '--interval SECONDS', '--until auto|settled|approved|merged',
+                     '--gates', '--no-review', '--allow-unapproved', 'python3', 'gh',
+                     '0', '1', '2', '3', 'settled', 'timeout', 'roborev', 'clean',
+                     'merge queue', 'required status checks', 'approving review'):
             self.assertIn(term, help_result.stdout)
-        for args in ([], ['--repo', 'owner/repo'], ['--repo', 'owner/repo', '--pr', '1'],
+        for args in ([], ['--repo', 'owner/repo'],
                      ['--repo', '../repo', '--pr', '1', '--head', HEAD],
                      ['--repo', 'owner/repo', '--pr', '0', '--head', HEAD],
                      ['--repo', 'owner/repo', '--pr', '-2', '--head', HEAD],
@@ -155,11 +170,13 @@ class SettleTests(unittest.TestCase):
     def test_settled_line_carries_head_checks_and_review(self):
         result = self.run_tool()
         self.assert_settled(result)
-        line = result.stdout.strip()
+        line = next((entry for entry in result.stdout.splitlines()
+                     if entry.startswith('PRSETTLE settled ')), '')
         self.assertTrue(line.startswith('PRSETTLE settled '), line)
         for token in (f'head={HEAD}', f'wanted={HEAD}', 'checks=green',
                       'roborev=current', f'reviewed={HEAD[:12]}', 'roborev_check=SUCCESS',
-                      'review=APPROVED', 'merge=CLEAN', 'pr=OPEN', 'draft=no'):
+                      'review=APPROVED', 'merge=CLEAN', 'pr=OPEN', 'draft=no',
+                      'next=merge'):
             self.assertIn(token, line)
 
     def test_commit_status_without_conclusion_is_not_outstanding(self):
@@ -308,6 +325,11 @@ class SettleTests(unittest.TestCase):
         self.assert_settled(result)
         self.assertIn(f'wanted={HEAD[:7]}', result.stdout)
 
+    def test_head_defaults_to_the_observed_head(self):
+        result = self.run_tool(head=None)
+        self.assert_settled(result)
+        self.assertIn(f'wanted={HEAD}', result.stdout)
+
     def test_stale_review_is_not_settled(self):
         self.data['issue_comments'] = [roborev_comment(sha=OTHER[:12])]
         result = self.run_tool()
@@ -377,6 +399,58 @@ class SettleTests(unittest.TestCase):
         result = self.run_tool()
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count('PRSETTLE closed'), 1, result.stdout)
+
+    def test_gates_prints_required_checks_approvals_and_queue(self):
+        self.data['protection'] = {
+            'required_status_checks': {'contexts': ['tests', 'lint']},
+            'required_pull_request_reviews': {'required_approving_review_count': 1}}
+        self.data['rulesets'] = [{'id': 1, 'name': 'main merge queue',
+                                  'enforcement': 'active', 'target': 'branch'}]
+        self.data['ruleset'] = {
+            'name': 'main merge queue', 'enforcement': 'active', 'target': 'branch',
+            'conditions': {'ref_name': {'include': ['~DEFAULT_BRANCH'], 'exclude': []}},
+            'rules': [{'type': 'merge_queue', 'parameters': {}}]}
+        result = self.run_tool('--gates', head=None)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        line = result.stdout.strip()
+        self.assertTrue(line.startswith('PRSETTLE gates '), line)
+        for token in ('required=lint,tests', 'approvals=1', 'queue=yes', 'roborev=yes',
+                      'base=main', 'next=enqueue'):
+            self.assertIn(token, line)
+        self.assertNotIn('PRSETTLE state', result.stdout)
+
+    def test_merge_queue_gate_yields_enqueue(self):
+        self.data['rulesets'] = [{'id': 1, 'name': 'main merge queue',
+                                  'enforcement': 'active', 'target': 'branch'}]
+        self.data['ruleset'] = {
+            'name': 'main merge queue', 'enforcement': 'active', 'target': 'branch',
+            'conditions': {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}},
+            'rules': [{'type': 'merge_queue', 'parameters': {}}]}
+        result = self.run_tool()
+        self.assert_settled(result)
+        self.assertIn('queue=yes', result.stdout)
+        self.assertIn('next=enqueue', result.stdout)
+
+    def test_auto_waits_for_a_required_approval_but_settled_does_not(self):
+        self.data['protection'] = {
+            'required_status_checks': {'contexts': ['tests']},
+            'required_pull_request_reviews': {'required_approving_review_count': 1}}
+        self.data['review_decision'] = 'REVIEW_REQUIRED'
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('approvals=1', result.stdout)
+        self.assertIn('next=approval', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+        result = self.run_tool('--until', 'settled')
+        self.assert_settled(result)
+        self.assertIn('next=approval', result.stdout)
+        self.assert_settled(self.run_tool('--allow-unapproved'))
+
+    def test_unreadable_gates_still_settle(self):
+        self.data['fail_many'] = ['protection', 'rulesets']
+        result = self.run_tool()
+        self.assert_settled(result)
+        self.assertIn('gates=unknown', result.stdout)
 
     def test_review_failed_for_the_head_settles_and_is_reported(self):
         self.data['issue_comments'] = [roborev_comment(kind='Review Failed')]

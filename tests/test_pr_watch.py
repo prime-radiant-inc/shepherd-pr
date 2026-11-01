@@ -36,18 +36,27 @@ else:
         prefix + '/pulls/' + pr + '/reviews': 'reviews',
         prefix + '/commits/' + fixture['pull']['head']['sha'] + '/check-runs': 'checks',
         prefix + '/commits/' + fixture['pull']['head']['sha'] + '/statuses': 'statuses',
+        prefix + '/branches/' + fixture['pull']['base']['ref'] + '/protection': 'protection',
+        prefix + '/rulesets': 'rulesets',
+        prefix + '/rulesets/1': 'ruleset',
+        prefix: 'repository',
     }
     key = routes.get(endpoint)
     if key is None:
         print('fixture: unknown repository, PR, head or endpoint', file=sys.stderr)
         sys.exit(4)
-    if fixture.get('fail') == key:
+    if key in (fixture.get('fail_many') or []) or fixture.get('fail') == key:
         print('fixture: request denied (HTTP 403) ' + fixture.get('error_detail', ''), file=sys.stderr)
         sys.exit(1)
     if fixture.get('malformed') == key:
         print('{not-json')
         sys.exit(0)
-    payload = fixture[key]
+    defaults = {'protection': None, 'rulesets': [], 'ruleset': {},
+                'repository': {'default_branch': 'main'}}
+    if key == 'protection' and key not in fixture:
+        print('fixture: Branch not protected (HTTP 404)', file=sys.stderr)
+        sys.exit(1)
+    payload = fixture[key] if key in fixture else defaults.get(key)
     if key != 'pull':
         pages = fixture.get('pages', {}).get(key, [payload])
         if '--paginate' not in args:
@@ -71,7 +80,8 @@ def observation():
     return {
         'repo': 'prime-radiant-inc/evener', 'pr': 954,
         'pull': {'number': 954, 'state': 'open', 'draft': False, 'merged': False,
-                 'mergeable': True, 'mergeable_state': 'clean', 'head': {'sha': 'a' * 40}},
+                 'mergeable': True, 'mergeable_state': 'clean',
+                 'head': {'sha': 'a' * 40}, 'base': {'ref': 'main'}},
         'issue_comments': [{'id': 1, 'body': 'original finding', 'user': {'login': 'reviewer'},
                             'created_at': '2026-09-01T00:00:00Z', 'updated_at': '2026-09-01T00:00:00Z'}],
         'review_comments': [], 'reviews': [],
@@ -157,6 +167,22 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(marker, result.stdout)
         self.assertEqual(result.stderr, '')
+
+    def test_armed_line_names_repository_gates(self):
+        self.data['protection'] = {
+            'required_status_checks': {'contexts': ['tests']},
+            'required_pull_request_reviews': {'required_approving_review_count': 1}}
+        self.data['rulesets'] = [{'id': 1, 'name': 'main merge queue',
+                                  'enforcement': 'active', 'target': 'branch'}]
+        self.data['ruleset'] = {
+            'name': 'main merge queue', 'enforcement': 'active', 'target': 'branch',
+            'conditions': {'ref_name': {'include': ['refs/heads/main'], 'exclude': []}},
+            'rules': [{'type': 'merge_queue', 'parameters': {}}]}
+        result = self.run_watcher()
+        self.assert_success(result, 'PRWATCH armed')
+        for token in ('gates=known', 'base=main', 'required=tests', 'approvals=1',
+                      'queue=yes', 'roborev=no'):
+            self.assertIn(token, result.stdout)
 
     def test_failed_request_preserves_baseline(self):
         self.assert_success(self.run_watcher(), 'PRWATCH armed')

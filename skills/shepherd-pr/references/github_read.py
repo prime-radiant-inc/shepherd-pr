@@ -32,7 +32,7 @@ def diagnostic(text):
     return re.sub(r'(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+', '[REDACTED]', text).strip()
 
 
-def request(endpoint, paginated=False, timeout=60):
+def request(endpoint, paginated=False, timeout=60, missing_ok=False):
     command = ['gh', 'api', '--hostname', 'github.com', '--method', 'GET', endpoint]
     if paginated:
         command += ['--paginate', '--slurp']
@@ -43,6 +43,8 @@ def request(endpoint, paginated=False, timeout=60):
         raise ReadError(f'GitHub request timed out: {endpoint}') from None
     if result.returncode:
         detail = diagnostic(result.stderr)
+        if missing_ok and re.search(r'\bHTTP 404\b', detail):
+            return None
         raise ReadError(f'GitHub request failed: {endpoint} (gh exit {result.returncode})'
                         + (f': {detail}' if detail else ''))
     try:
