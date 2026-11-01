@@ -105,6 +105,11 @@ MARKER = '<!-- roborev-pr-comment -->'
 HEADER = re.compile(
     r'^##\s+roborev:\s+(.+?)\s+\(`([0-9a-fA-F]{7,64})`\)\s*$', re.M)
 SEVERITY = re.compile(r'\*\*\s*severity\s*[*:\s]*(critical|high|medium|low)', re.I)
+SEVERITY_HEADING = re.compile(
+    r'^#{1,6}\s+\W*(critical|high|medium|low)\b'
+    r'(?:\W*(?:severity|priority|findings?|issues?))?\W*(?:\d+\W*)?$', re.I | re.M)
+ANY_HEADING = re.compile(r'^#{1,6}\s', re.M)
+FINDING = re.compile(r'^(?:[-*]|\d+\.)\s', re.M)
 VERDICT = re.compile(r'^\s*\*\*\s*Verdict:\*\*\s*(.+?)\s*$', re.M | re.I)
 SEVERITY_ORDER = ('critical', 'high', 'medium', 'low')
 
@@ -126,10 +131,19 @@ def roborev_comments(repo, pr):
 
 
 def severities(body):
-    counts = {name: 0 for name in SEVERITY_ORDER}
+    inline = {name: 0 for name in SEVERITY_ORDER}
+    headed = {name: 0 for name in SEVERITY_ORDER}
     for match in SEVERITY.finditer(body):
-        counts[match.group(1).lower()] += 1
-    return counts
+        inline[match.group(1).lower()] += 1
+    for match in SEVERITY_HEADING.finditer(body):
+        rest = body[match.end():]
+        next_heading = ANY_HEADING.search(rest)
+        section = rest[:next_heading.start()] if next_heading else rest
+        # A heading with no list under it still counts, so a change in how
+        # findings are listed cannot hide a severity.
+        headed[match.group(1).lower()] += max(1, len(FINDING.findall(section)))
+    # One finding can carry both forms, so take the larger count, not the sum.
+    return {name: max(inline[name], headed[name]) for name in SEVERITY_ORDER}
 
 
 def verdict(body):
