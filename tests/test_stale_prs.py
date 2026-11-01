@@ -4,12 +4,13 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = Path(os.environ.get('STALEPR_TEST_SCRIPT',
-                             ROOT / 'skills/shepherd-pr/references/stale-prs.sh'))
+                             ROOT / 'skills/shepherd-pr/scripts/stale-prs.py'))
 
 GH_FIXTURE = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -94,12 +95,12 @@ class StalePrTests(unittest.TestCase):
 
     def run_tool(self, *args):
         self.fixture.write_text(json.dumps(self.data))
-        return subprocess.run(['bash', str(SCRIPT), '--repo', self.data['repo'], *args],
+        return subprocess.run([sys.executable, str(SCRIPT), '--repo', self.data['repo'], *args],
                               env=self.env, cwd=self.directory, text=True,
                               capture_output=True, timeout=15)
 
     def test_help_and_usage(self):
-        help_result = subprocess.run(['bash', str(SCRIPT), '--help'], env=self.env,
+        help_result = subprocess.run([sys.executable, str(SCRIPT), '--help'], env=self.env,
                                      text=True, capture_output=True, timeout=15)
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         for term in ('--repo OWNER/REPO', '--hours', '--include-drafts', '--json',
@@ -112,13 +113,13 @@ class StalePrTests(unittest.TestCase):
                      ['--repo', '../repo', '--hours', '6'],
                      ['--repo', 'a/b', '--hours', '6', '--unknown']):
             with self.subTest(args=args):
-                result = subprocess.run(['bash', str(SCRIPT), *args], env=self.env,
+                result = subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env,
                                         text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn('usage', result.stderr.lower())
         for args in ([], ['--hours', '6']):
             with self.subTest(args=args):
-                result = subprocess.run(['bash', str(SCRIPT), *args], env=self.env,
+                result = subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env,
                                         text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
 
@@ -257,13 +258,6 @@ class StalePrTests(unittest.TestCase):
         for secret in ('credential-value-from-environment', 'github_pat_example123'):
             self.assertNotIn(secret, result.stdout + result.stderr)
         self.assertIn('[REDACTED]', result.stderr)
-
-    def test_missing_python_is_operational_error(self):
-        self.env['PATH'] = str(self.bin)
-        result = subprocess.run(['/bin/bash', str(SCRIPT), '--help'], env=self.env,
-                                text=True, capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn('python3 is required', result.stderr)
 
 
 if __name__ == '__main__':

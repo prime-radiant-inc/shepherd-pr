@@ -31,19 +31,47 @@ the checks.
 
 ## Observe
 
+The settle detector discovers this repository's gates itself. Every invocation
+reads the pull request's base branch and that branch's required checks,
+required approving reviews, merge queue and roborev presence, then prints one
+`PRSETTLE gates` line. Ask for the line alone, before pushing, with:
+
+```bash
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py \
+  --repo example/widgets --pr 42 --gates
+```
+
+Repositories differ, and the line says how: evener requires an approving review
+and merges through a queue; chao and shepherd-pr run no roborev. Its `next=`
+names the one action left — `wait`, `fix`, `approval`, `enqueue`, `merge`,
+`re-arm` or `done`. `gates=unknown` means branch policy was unreadable; the wait
+still runs, so read the repository's instructions for the missing gate.
+
+`REVIEW_REQUIRED` means a human approval gates the merge, and an approval from
+your own account does not satisfy it. A `merge queue` gate means the merge
+happens in the queue, not on the PR head. Neither is a reason to write a watcher.
+
 Use a bundled read-only observation tool, and pick it by the question you are
 asking:
 
-- The [watcher](references/pr-watch.sh), with its adjacent
-  [Python helper](references/pr_watch.py), answers “tell me the moment
-  anything changes” — a new comment, a new commit from someone else, any CI
-  transition.
-- The settle detector [pr-settle.sh](references/pr-settle.sh), with its
-  adjacent [Python helper](references/pr_settle.py), answers “tell me when this
+- The [watcher](scripts/pr-watch.py) answers “tell me the moment anything
+  changes” — a new comment, a new commit from someone else, any CI transition.
+- The [settle detector](scripts/pr-settle.py) answers “tell me when this
   PR is finished waiting” — head unchanged, no check outstanding (the *current*
   run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
-  superseded history), and roborev's combined review written for that exact
-  head.
+  superseded history), the review gate satisfied, and — where the repository
+  runs roborev — its combined review written for that exact head. `--until auto`,
+  the default, also requires the approving review when the repository requires
+  one. It reports the approval decision, merge state and PR state, and it covers
+  the waits agents used to hand-roll:
+
+| The wait is on | Invocation |
+| --- | --- |
+| CI, review and any required approval for a known head | `--count 40 --interval 60` |
+| Someone else's approving review, on a repository whose policy disagrees | `--until approved` |
+| A merge queue finishing the merge | `--until merged` |
+| CI and review only, ignoring approval | `--until settled` |
+| CI only, in a repository without roborev | automatic, or `--no-review` |
 
 When the wait is on CI plus a review for a known head, prefer the settle
 detector: it prints one short line per state-class change and a final settled
@@ -56,18 +84,28 @@ directory and read `--help` for dependencies, state, and exit statuses.
 
 ```bash
 # One observation.
-bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42
+python3 /path/to/skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42
 
 # A bounded batch: at most nine observations, 90 seconds apart, stopping at the
 # first change.
-bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42 \
   --count 9 --interval 90
 
-# Wait until the PR is finished for this exact head: at most 40 observations,
-# 60 seconds apart, printing only state changes and then a settled line.
+# The standard wait: at most 40 observations, 60 seconds apart. The head
+# defaults to the one observed now, so this is the whole command.
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
+  --count 40 --interval 60
+
+# When another actor might push, pin the head you are judging.
 head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
+
+# Wait for the human approval this repository requires, then for the queue.
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
+  --until approved --count 40 --interval 60
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
+  --until merged --count 60 --interval 60
 ```
 
 One process performs each batch, so you supply no loop. `--count` is the
@@ -80,14 +118,26 @@ prints `PRWATCH monitor complete` only when it finishes unchanged. Inspect the
 initial state too. Errors exit nonzero, abort the batch, and preserve the last
 valid baseline; report them.
 
+The settle detector stops early on a terminal outcome instead of waiting out
+the budget: exit 3 with `PRSETTLE failed` (a completed failing check),
+`moved` (the head you asked about was replaced — re-read and re-arm),
+`blocked` (changes requested) or `closed`. Exit 0 with `PRSETTLE merged` is the
+end of the queue wait. Treat exit 3 as the signal to act, not to poll again.
+
 Use a fresh state directory per observation cycle. A reused `--state-dir`
 reports the previous cycle's change as its first observation, which looks like
 progress and is not. The settle detector keeps no state and needs no directory.
 
-Agree the observation budget and cadence with the user (for example, `--count 5
---interval 120`); stop the job at the limit or outcome. CI progress also consumes
-change notifications. No goal tool is required. Never claim monitoring survives
-job completion or the harness session.
+Use the standard budget above. Do not ask the user to choose a polling cadence
+or a count; ask only when the user set a different budget. CI progress also
+consumes change notifications. No goal tool is required. Never claim monitoring
+survives job completion or the harness session.
+
+Do not write your own polling loop, approval watcher or merge-queue watcher.
+The bundled tools cover changes, settlement, approval and the queue; adding a
+shell loop on top multiplies requests, hides failures, and usually outlives the
+round that needed it. The watcher's first line carries the same gates summary,
+so even a change watch tells you what the repository requires.
 
 Run the batch as a background job and use the wakeup your harness actually
 supports; do not invent tools:
@@ -106,10 +156,10 @@ repository, paginated reads, redacted diagnostics, exit 0 success /
 
 ```bash
 # Read one PR's roborev combined review (the bot edits one comment in place).
-bash /path/to/skills/shepherd-pr/references/roborev-review.sh --repo example/widgets --pr 42
+python3 /path/to/skills/shepherd-pr/scripts/roborev-review.py --repo example/widgets --pr 42
 
 # List open PRs with no update in N hours; drafts are excluded unless asked.
-bash /path/to/skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
+python3 /path/to/skills/shepherd-pr/scripts/stale-prs.py --repo example/widgets --hours 6
 ```
 
 The reader prints a ROBOREV summary line — head, reviewed commit, state
@@ -126,6 +176,14 @@ round as: make the whole round's edits, merge the base locally if it moved,
 push once, then wait once — one push, one CI run, one review. The settle
 detector's currency test is the reviewed SHA in the combined comment against
 the current head, never the comment's identity or its timestamp.
+
+Report at a round checkpoint: five rounds by default, or the number the user
+authorized. At the checkpoint, state the round count and whether findings are
+shrinking, then continue within the standing authorization or stop when one of
+these holds: the same finding class survives its fix, only findings outside the
+PR's stated scope remain, or the reviewer is discovering new low-severity nits
+instead of defects. File those as follow-up issues. A pull request at its tenth
+round is evidence the slice is wrong, not a signal to push again.
 
 Green is not clean. A passing roborev status context and green CI do not mean
 the review found nothing: roborev's own commit status reports success even
@@ -176,7 +234,7 @@ repository has no RoboRev.
    file/line evidence and batch valid findings with regression tests.
    Optional RoboRev edits its combined comment in place; compare its body
    and `Combined Review` SHA, not just comment ID. The bundled
-   `references/roborev-review.sh` performs exactly that comparison. When a
+   `scripts/roborev-review.py` performs exactly that comparison. When a
    finding is fixed, reproduce the reviewer's scenario as a test, then prove
    the test fails without the fix: revert or mutate the fix locally, watch it
    fail with the reviewer's own complaint, restore, and re-run. Report that

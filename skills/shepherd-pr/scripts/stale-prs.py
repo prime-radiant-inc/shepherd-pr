@@ -15,15 +15,14 @@ import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from github_read import ReadError, field, items  # noqa: E402
-from roborev_review import (SEVERITY_ORDER, comments as roborev_comments, review,  # noqa: E402
-                            severity_text, verdict)
+from github import (SEVERITY_ORDER, ReadError, field, items,  # noqa: E402
+                    review, roborev_comments, severity_text)
 
 MAX_HOURS = 8760
 
 HELP = """One read-only observation of stale open GitHub pull requests.
 
-Dependencies: bash, gh (authenticated GitHub CLI with --paginate/--slurp),
+Dependencies: gh (authenticated GitHub CLI with --paginate/--slurp),
 python3 (standard library), on macOS or Linux.
 
 Lists open pull requests whose most recent update is older than --hours
@@ -56,7 +55,7 @@ def arguments():
     parser = argparse.ArgumentParser(
         description=HELP, formatter_class=argparse.RawDescriptionHelpFormatter,
         usage='%(prog)s --repo OWNER/REPO [--hours N] [--include-drafts] [--json]',
-        prog='stale-prs.sh', allow_abbrev=False)
+        prog='stale-prs.py', allow_abbrev=False)
     parser.add_argument('--repo', required=True, action=Once, metavar='OWNER/REPO')
     parser.add_argument('--hours', action=Once, metavar='N')
     parser.add_argument('--include-drafts', action='store_true')

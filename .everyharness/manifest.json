@@ -6,28 +6,28 @@
       "sha256": "2287d91f4408d64be91775efe1244950ff828fca5209946177f8a4cc68595ecd"
     },
     ".claude-plugin/marketplace.json": {
-      "sha256": "41ebf9f3bee67c2963e910f32b13ef54af3d9bc5e0e71a149aa1d0b4fd5bd9e0"
+      "sha256": "2dcb54219a6645c4d87e4855459e88537fbfbb4804e1017b3ba137a3d77bd671"
     },
     ".claude-plugin/plugin.json": {
-      "sha256": "ba72b3113b42b1a5e9d71b59dffd72d1c2585649f860ae247b566c9cc3e5852e"
+      "sha256": "f46c471fbb6b9540e0a50a10ddab836cd2261346e647adb9cee0944783508b83"
     },
     ".codex-plugin/plugin.json": {
-      "sha256": "409ceeb259852ab50c9a5fb3d7dcc0985c69741210aa61f8229f4e4dfd220ac5"
+      "sha256": "42b703b2f6caea29624d8fe66d8fa2bc1be88ec6190f4a66a4c2d688e794fdc3"
     },
     ".cursor-plugin/plugin.json": {
-      "sha256": "76cb0b099fbac2e6ed220b5407a6dee38b63ade9f2368a512645fb174fe193ad"
+      "sha256": "36319ba5f5c1110e8403ae1853a4fecade068cc4afba76fe8d380205217c9db6"
     },
     ".devin-plugin/plugin.json": {
-      "sha256": "3b5d4679b56bf94f03b839a9412de7003925dc47b4a3545f9d34da49eab94882"
+      "sha256": "650bcea49a13c9f5e4415fef873475389ce3f6b96ebbe29607c8e1a8cef68c0e"
     },
     ".hermes-plugin/__init__.py": {
       "sha256": "fb00bc07aa160b0fdcfef119bc70881998a6d3457788faf4fd9c1f156b5457a2"
     },
     ".hermes-plugin/plugin.yaml": {
-      "sha256": "85cf9880bbc836dc7f908982b6048c9dfbe1f7753b5d392bc183152add5487a0"
+      "sha256": "0e958f102a097b5e3bc6adfdc79ea03e8ea705407af41c7444cbed81954f18c4"
     },
     ".kimi-plugin/plugin.json": {
-      "sha256": "1b1c600302bf7bc76ec76d1f5d5de871d8458565eaa29d391b97ec70ec204b8e"
+      "sha256": "9cd5b59d580fef0a0843018408d32954a27fcc9452b0ebf97a0188c0ae3c1be8"
     },
     ".opencode/plugins/shepherd-pr.js": {
       "sha256": "b39c95607ef6c695a0a45fc68f740a0c585c57d40f9de0b74031f28624578684"
@@ -75,13 +75,13 @@
       "sha256": "9907824a2d77cee015a49c269aeeb740bd0d1cd298b5a11c16ca172cc39c32aa"
     },
     "gemini-extension.json": {
-      "sha256": "a898bd93ce0fb408c5a6639b68cc2d3a64e679c5e873abd359078d3571e0ccb6"
+      "sha256": "f6634fef7abcfb65964d498445a40858b8fc39f6e23fff87e20fcc2b166cf160"
     },
     "package.json": {
-      "sha256": "66d76a9ebd3f6dc20812a27af9c2931c565ef03c38d8e0f55429f2fe191574ba"
+      "sha256": "642af0f3a1717ad957115b714036f2461c3eafd6aed7034a73fa36fc870fb51f"
     },
     "plugin.json": {
-      "sha256": "20a89f195b31de28fbf243ecb4f097e926e5a64692e420cbcc280efb1abbc7b8"
+      "sha256": "0bb5b2ede74fb491966fec534399fe5df6b69a2aa890a8afae3bc3a2296af41d"
     }
   }
 }
