@@ -103,9 +103,9 @@ python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets 
 
 # Wait for the human approval this repository requires, then for the queue.
 python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
-  --head "$head" --until approved --count 40 --interval 60
+  --until approved --count 40 --interval 60
 python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
-  --head "$head" --until merged --count 60 --interval 60
+  --until merged --count 60 --interval 60
 ```
 
 One process performs each batch, so you supply no loop. `--count` is the
