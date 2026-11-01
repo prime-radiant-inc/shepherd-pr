@@ -107,8 +107,9 @@ bash skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
 ```
 
 This is five observations with at most four 120-second pauses, plus API time;
-each request has a 60-second timeout, not a whole-batch deadline. Choose a
-budget with the user. Cancel the job to stop early and clear associated
+each request has a 60-second timeout, not a whole-batch deadline. Use the
+standard budget unless the user set one; the tools do not need a user-chosen
+polling cadence. Cancel the job to stop early and clear associated
 watches. After the batch completes **nothing remains monitoring**.
 Session-owned jobs may stop when the session ends; do not promise unattended
 persistence.
@@ -147,8 +148,7 @@ directory you selected. This resets baselines. Never delete a live lock.
 `pr-settle.sh` answers a different question from the change watcher: not "what
 changed?" but "is this pull request finished waiting?" It polls one PR for a
 bounded `--count`/`--interval` (same flags as the watcher) and prints a short
-`PRSETTLE state` line only when the state class changes, then a final line. It
-exits 0 when settled and 1 on timeout or operational failure.
+`PRSETTLE state` line only when the state class changes, then a final line.
 
 ```bash
 head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
@@ -156,19 +156,35 @@ bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
 ```
 
-Settled means the head still equals `--head`, no check is outstanding, and
-roborev's combined review names that exact head. "Outstanding" is judged on the
-current run of each check name and the current state of each commit-status
-context: a check run is outstanding unless it is COMPLETED with SUCCESS, NEUTRAL
-or SKIPPED, and a commit status unless it is SUCCESS or NEUTRAL.
+Settled means the head still equals `--head`, no check is outstanding, the
+review gate is satisfied, and the approval gate is satisfied. "Outstanding" is
+judged on the current run of each check name and the current state of each
+commit-status context: a check run is outstanding unless it is COMPLETED with
+SUCCESS, NEUTRAL or SKIPPED, and a commit status unless it is SUCCESS or NEUTRAL.
 `statusCheckRollup` keeps superseded history, so a name with a newer run is
 judged by that newer run rather than by any older CANCELLED or FAILURE entry,
-exactly as `gh pr checks` reports it. Settled does not mean the review is
-clean: roborev's green commit status can coexist with a comment full of
-findings, so the settled line reports the review's
-severity/verdict hint and the separate `roborev_check` context. Prefer this tool
-when the wait is on CI plus a review for a known head; use the watcher when any
-change must be seen. The settle detector keeps no state directory.
+exactly as `gh pr checks` reports it.
+
+The review gate does not assume roborev: a repository with neither a combined
+comment nor a roborev check context settles with `roborev=absent`, and
+`--no-review` skips the gate explicitly. The approval gate accepts `APPROVED`
+or no requirement; `REVIEW_REQUIRED` waits until approved (or settles with
+`--allow-unapproved` when an administrative merge was authorized).
+`--until approved` waits for a human approval, and `--until merged` waits
+through a merge queue until GitHub reports the pull request merged.
+
+Settled does not mean the review is clean: roborev's green commit status can
+coexist with a comment full of findings, so the settled line reports the
+review's severity/verdict hint and the separate `roborev_check` context. The
+line also carries `review=`, `merge=`, `pr=` and `draft=` so the caller can see
+the gate state it is about to act on. Prefer this tool when the wait is on CI
+plus a review for a known head; use the watcher when any change must be seen.
+The settle detector keeps no state directory.
+
+Exit statuses: 0 settled or merged; 1 timeout or operational failure;
+2 usage error; 3 terminal but not settled (`PRSETTLE failed`, `moved`,
+`blocked`, or `closed`). A completed failing check ends the wait immediately
+instead of burning the observation budget.
 
 ## Review reading and stale pull-request triage
 

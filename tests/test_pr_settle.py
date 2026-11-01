@@ -24,7 +24,13 @@ if args[:2] == ['pr', 'view']:
     if fixture.get('malformed') == 'pr view':
         print('{not-json')
         sys.exit(0)
-    print(json.dumps({'headRefOid': fixture['head'], 'statusCheckRollup': fixture['rollup']}))
+    print(json.dumps({
+        'headRefOid': fixture['head'], 'statusCheckRollup': fixture['rollup'],
+        'reviewDecision': fixture.get('review_decision', 'APPROVED'),
+        'mergeable': fixture.get('mergeable', 'MERGEABLE'),
+        'mergeStateStatus': fixture.get('merge_state', 'CLEAN'),
+        'state': fixture.get('state', 'OPEN'),
+        'isDraft': fixture.get('draft', False)}))
     sys.exit(0)
 endpoint = next((a for a in args if a.startswith('repos/')), '')
 endpoint = endpoint.split('?')[0]
@@ -109,10 +115,10 @@ class SettleTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
                         GH_FIXTURE=str(self.fixture), HOME=str(self.directory / 'home'))
 
-    def run_tool(self, *args):
+    def run_tool(self, *args, head=HEAD):
         self.fixture.write_text(json.dumps(self.data))
         return subprocess.run(['bash', str(SCRIPT), '--repo', self.data['repo'],
-                               '--pr', str(self.data['pr']), '--head', HEAD, *args],
+                               '--pr', str(self.data['pr']), '--head', head, *args],
                               env=self.env, cwd=self.directory, text=True,
                               capture_output=True, timeout=20)
 
@@ -127,8 +133,9 @@ class SettleTests(unittest.TestCase):
                                      text=True, capture_output=True, timeout=15)
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         for term in ('--repo OWNER/REPO', '--pr NUMBER', '--head SHA', '--count N',
-                     '--interval SECONDS', 'python3', 'gh', '0', '1', '2',
-                     'settled', 'timeout', 'roborev', 'clean'):
+                     '--interval SECONDS', '--until settled|approved|merged',
+                     '--no-review', '--allow-unapproved', 'python3', 'gh', '0', '1', '2',
+                     '3', 'settled', 'timeout', 'roborev', 'clean', 'merge queue'):
             self.assertIn(term, help_result.stdout)
         for args in ([], ['--repo', 'owner/repo'], ['--repo', 'owner/repo', '--pr', '1'],
                      ['--repo', '../repo', '--pr', '1', '--head', HEAD],
@@ -151,7 +158,8 @@ class SettleTests(unittest.TestCase):
         line = result.stdout.strip()
         self.assertTrue(line.startswith('PRSETTLE settled '), line)
         for token in (f'head={HEAD}', f'wanted={HEAD}', 'checks=green',
-                      'roborev=current', f'reviewed={HEAD[:12]}', 'roborev_check=SUCCESS'):
+                      'roborev=current', f'reviewed={HEAD[:12]}', 'roborev_check=SUCCESS',
+                      'review=APPROVED', 'merge=CLEAN', 'pr=OPEN', 'draft=no'):
             self.assertIn(token, line)
 
     def test_commit_status_without_conclusion_is_not_outstanding(self):
@@ -196,17 +204,20 @@ class SettleTests(unittest.TestCase):
         self.data['rollup'] = [current, superseded, commit_status('roborev', 'SUCCESS')]
         self.assert_settled(self.run_tool())
 
-    def test_newest_failure_remains_outstanding(self):
+    def test_newest_failure_stops_the_wait(self):
         # A fix that ignores failures wholesale would wrongly settle here: the
-        # newest run for the name is the failing one.
+        # newest run for the name is the failing one. A completed failure is a
+        # terminal outcome, not a reason to keep polling until the budget ends.
         older = run_check('static', 'COMPLETED', 'SUCCESS',
                           ident=100, started='2026-09-17T18:19:04Z')
         newest = run_check('static', 'COMPLETED', 'FAILURE',
                            ident=200, started='2026-09-17T18:27:29Z')
         self.data['rollup'] = [older, newest, commit_status('roborev', 'SUCCESS')]
         result = self.run_tool()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn('checks=outstanding:static', result.stdout)
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('checks=failed:static', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE failed'), 1, result.stdout)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
         self.assertNotIn('PRSETTLE settled', result.stdout)
 
     def test_newest_in_progress_remains_outstanding(self):
@@ -237,13 +248,11 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('checks=outstanding:external', result.stdout)
 
-    def test_only_historical_entries_do_not_wedge_the_tool(self):
+    def test_a_current_cancelled_check_is_a_terminal_failure(self):
         # A job cancelled in the superseded run that never re-ran leaves one
         # CANCELLED entry and no newer run for its name. The newest entry for
-        # that name is still the CANCELLED one, so the documented rule keeps it
-        # outstanding rather than ignoring cancelled runs wholesale; "not
-        # wedged" here means the tool must terminate at its budget with a
-        # definite report instead of crashing or spinning.
+        # that name is still the CANCELLED one, so the wait ends immediately
+        # with a definite report instead of polling to the budget.
         self.data['rollup'] = [
             run_check('tests', 'COMPLETED', 'SUCCESS', ident=200,
                       started='2026-09-17T18:19:15Z'),
@@ -251,24 +260,32 @@ class SettleTests(unittest.TestCase):
                       started='2026-09-17T18:19:05Z'),
             commit_status('roborev', 'SUCCESS')]
         result = self.run_tool('--count', '2', '--interval', '1')
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(result.stderr, '')
-        self.assertIn('checks=outstanding:retired', result.stdout)
-        self.assertEqual(result.stdout.count('PRSETTLE state'), 1, result.stdout)
-        self.assertEqual(result.stdout.count('PRSETTLE timeout'), 1, result.stdout)
+        self.assertIn('checks=failed:retired', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE state'), 0, result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE failed'), 1, result.stdout)
         self.assertNotIn('PRSETTLE settled', result.stdout)
 
-    def test_in_progress_and_failed_check_runs_are_outstanding(self):
+    def test_unfinished_check_runs_are_outstanding(self):
         for status, conclusion, name in (('IN_PROGRESS', None, 'tests'),
-                                         ('QUEUED', None, 'lint'),
-                                         ('COMPLETED', 'FAILURE', 'tests'),
-                                         ('COMPLETED', 'CANCELLED', 'native'),
-                                         ('COMPLETED', 'TIMED_OUT', 'fuzz')):
+                                         ('QUEUED', None, 'lint')):
             with self.subTest(conclusion=conclusion, status=status):
                 self.data['rollup'] = [run_check(name, status, conclusion)]
                 result = self.run_tool()
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn(f'checks=outstanding:{name}', result.stdout)
+
+    def test_completed_failures_end_the_wait(self):
+        for conclusion, name in (('FAILURE', 'tests'), ('CANCELLED', 'native'),
+                                 ('TIMED_OUT', 'fuzz'), ('ACTION_REQUIRED', 'deploy'),
+                                 ('STARTUP_FAILURE', 'build')):
+            with self.subTest(conclusion=conclusion):
+                self.data['rollup'] = [run_check(name, 'COMPLETED', conclusion)]
+                result = self.run_tool('--count', '3', '--interval', '1')
+                self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+                self.assertIn(f'checks=failed:{name}', result.stdout)
+                self.assertNotIn('PRSETTLE timeout', result.stdout)
 
     def test_accepted_conclusions_are_green(self):
         self.data['rollup'] = [run_check('docs', 'COMPLETED', 'SKIPPED'),
@@ -277,15 +294,19 @@ class SettleTests(unittest.TestCase):
         self.assert_settled(self.run_tool())
         self.assertIn('checks=green', self.run_tool().stdout)
 
-    def test_head_moved_under_the_wait_is_not_settled(self):
+    def test_head_moved_under_the_wait_ends_the_wait(self):
         self.data['head'] = OTHER
         self.data['issue_comments'] = [roborev_comment(sha=OTHER[:12])]
-        result = self.run_tool()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        result = self.run_tool('--count', '3', '--interval', '1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertIn(f'head={OTHER} wanted={HEAD}', result.stdout)
-        self.assertIn('checks=green', result.stdout)
-        self.assertIn('roborev=current', result.stdout)
-        self.assertIn('PRSETTLE timeout', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE moved'), 1, result.stdout)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
+
+    def test_short_head_prefix_is_accepted(self):
+        result = self.run_tool(head=HEAD[:7])
+        self.assert_settled(result)
+        self.assertIn(f'wanted={HEAD[:7]}', result.stdout)
 
     def test_stale_review_is_not_settled(self):
         self.data['issue_comments'] = [roborev_comment(sha=OTHER[:12])]
@@ -300,6 +321,62 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('roborev=none', result.stdout)
         self.assertIn('reviewed=-', result.stdout)
+
+    def test_repository_without_roborev_settles_without_a_review(self):
+        # No combined comment and no roborev check context: the repository does
+        # not run roborev, so waiting for a review would always time out.
+        self.data['issue_comments'] = []
+        self.data['rollup'] = [run_check('tests')]
+        result = self.run_tool()
+        self.assert_settled(result)
+        self.assertIn('roborev=absent', result.stdout)
+
+    def test_no_review_flag_ignores_a_missing_review(self):
+        self.data['issue_comments'] = []
+        result = self.run_tool('--no-review')
+        self.assert_settled(result)
+        self.assertIn('roborev=skipped', result.stdout)
+
+    def test_approval_requirement_blocks_settlement_without_admin_override(self):
+        self.data['review_decision'] = 'REVIEW_REQUIRED'
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('review=REVIEW_REQUIRED', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+        self.assert_settled(self.run_tool('--allow-unapproved'))
+
+    def test_changes_requested_ends_the_wait(self):
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        result = self.run_tool('--count', '3', '--interval', '1')
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn('review=CHANGES_REQUESTED', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE blocked'), 1, result.stdout)
+
+    def test_until_approved_waits_for_approval(self):
+        self.data['review_decision'] = 'REVIEW_REQUIRED'
+        result = self.run_tool('--until', 'approved')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('review=REVIEW_REQUIRED', result.stdout)
+        self.assertEqual(result.stdout.count('PRSETTLE state'), 1, result.stdout)
+        self.data['review_decision'] = 'APPROVED'
+        self.assert_settled(self.run_tool('--until', 'approved'))
+
+    def test_until_merged_waits_through_the_queue(self):
+        self.data['merge_state'] = 'BLOCKED'
+        result = self.run_tool('--until', 'merged', '--count', '2', '--interval', '1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('merge=BLOCKED', result.stdout)
+        self.assertNotIn('PRSETTLE merged', result.stdout)
+        self.data['state'] = 'MERGED'
+        result = self.run_tool('--until', 'merged')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE merged'), 1, result.stdout)
+
+    def test_closed_unmerged_ends_the_wait(self):
+        self.data['state'] = 'CLOSED'
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE closed'), 1, result.stdout)
 
     def test_review_failed_for_the_head_settles_and_is_reported(self):
         self.data['issue_comments'] = [roborev_comment(kind='Review Failed')]

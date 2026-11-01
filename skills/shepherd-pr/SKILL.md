@@ -31,6 +31,22 @@ the checks.
 
 ## Observe
 
+First read the gates this repository actually enforces. Repositories differ:
+some run roborev, some require an approving review, some enqueue merges.
+
+```bash
+gh pr view 42 --repo example/widgets --json \
+  state,isDraft,reviewDecision,mergeable,mergeStateStatus,statusCheckRollup
+gh pr checks 42 --repo example/widgets
+gh api repos/example/widgets/branches/main/protection   # required checks, reviews
+```
+
+`reviewDecision` of `REVIEW_REQUIRED` means a human approval gates the merge;
+an approval from your own account does not satisfy it. A `merge-group-report`
+check or a `merge queue` rule means the merge happens through the queue, not on
+the PR head. `roborev-review.sh` reporting `state=none` while `gh pr checks`
+shows no roborev context means the repository does not run roborev.
+
 Use a bundled read-only observation tool, and pick it by the question you are
 asking:
 
@@ -42,8 +58,17 @@ asking:
   adjacent [Python helper](references/pr_settle.py), answers “tell me when this
   PR is finished waiting” — head unchanged, no check outstanding (the *current*
   run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
-  superseded history), and roborev's combined review written for that exact
-  head.
+  superseded history), the review gate satisfied, and — where the repository
+  runs roborev — its combined review written for that exact head. It reports
+  the approval decision, merge state and PR state, and it covers the waits
+  agents used to hand-roll:
+
+| The wait is on | Invocation |
+| --- | --- |
+| CI and the review for a known head | `--count 40 --interval 60` |
+| Someone else's approving review | `--until approved` |
+| A merge queue finishing the merge | `--until merged` |
+| CI only, in a repository without roborev | any of the above, or `--no-review` |
 
 When the wait is on CI plus a review for a known head, prefer the settle
 detector: it prints one short line per state-class change and a final settled
@@ -63,11 +88,16 @@ bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets -
 bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
   --count 9 --interval 90
 
-# Wait until the PR is finished for this exact head: at most 40 observations,
-# 60 seconds apart, printing only state changes and then a settled line.
+# The standard wait: at most 40 observations, 60 seconds apart.
 head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
 bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
+
+# Wait for the human approval this repository requires, then for the queue.
+bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+  --head "$head" --until approved --count 40 --interval 60
+bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+  --head "$head" --until merged --count 60 --interval 60
 ```
 
 One process performs each batch, so you supply no loop. `--count` is the
@@ -80,14 +110,25 @@ prints `PRWATCH monitor complete` only when it finishes unchanged. Inspect the
 initial state too. Errors exit nonzero, abort the batch, and preserve the last
 valid baseline; report them.
 
+The settle detector stops early on a terminal outcome instead of waiting out
+the budget: exit 3 with `PRSETTLE failed` (a completed failing check),
+`moved` (the head you asked about was replaced — re-read and re-arm),
+`blocked` (changes requested) or `closed`. Exit 0 with `PRSETTLE merged` is the
+end of the queue wait. Treat exit 3 as the signal to act, not to poll again.
+
 Use a fresh state directory per observation cycle. A reused `--state-dir`
 reports the previous cycle's change as its first observation, which looks like
 progress and is not. The settle detector keeps no state and needs no directory.
 
-Agree the observation budget and cadence with the user (for example, `--count 5
---interval 120`); stop the job at the limit or outcome. CI progress also consumes
-change notifications. No goal tool is required. Never claim monitoring survives
-job completion or the harness session.
+Use the standard budget above. Do not ask the user to choose a polling cadence
+or a count; ask only when the user set a different budget. CI progress also
+consumes change notifications. No goal tool is required. Never claim monitoring
+survives job completion or the harness session.
+
+Do not write your own polling loop, approval watcher or merge-queue watcher.
+The bundled tools cover changes, settlement, approval and the queue; adding a
+shell loop on top multiplies requests, hides failures, and usually outlives the
+round that needed it.
 
 Run the batch as a background job and use the wakeup your harness actually
 supports; do not invent tools:
@@ -126,6 +167,13 @@ round as: make the whole round's edits, merge the base locally if it moved,
 push once, then wait once — one push, one CI run, one review. The settle
 detector's currency test is the reviewed SHA in the combined comment against
 the current head, never the comment's identity or its timestamp.
+
+Keep a round budget: five rounds by default, or the number the user authorized.
+Stop and report with evidence — rather than opening another round — when the
+budget is spent, when the same finding class survives its fix, or when only
+findings outside the PR's stated scope remain. File those as follow-up issues.
+A pull request at its tenth round is evidence the slice is wrong, not a signal
+to push again.
 
 Green is not clean. A passing roborev status context and green CI do not mean
 the review found nothing: roborev's own commit status reports success even
