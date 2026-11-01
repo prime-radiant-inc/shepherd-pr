@@ -168,12 +168,13 @@ push once, then wait once — one push, one CI run, one review. The settle
 detector's currency test is the reviewed SHA in the combined comment against
 the current head, never the comment's identity or its timestamp.
 
-Keep a round budget: five rounds by default, or the number the user authorized.
-Stop and report with evidence — rather than opening another round — when the
-budget is spent, when the same finding class survives its fix, or when only
-findings outside the PR's stated scope remain. File those as follow-up issues.
-A pull request at its tenth round is evidence the slice is wrong, not a signal
-to push again.
+Report at a round checkpoint: five rounds by default, or the number the user
+authorized. At the checkpoint, state the round count and whether findings are
+shrinking, then continue within the standing authorization or stop when one of
+these holds: the same finding class survives its fix, only findings outside the
+PR's stated scope remain, or the reviewer is discovering new low-severity nits
+instead of defects. File those as follow-up issues. A pull request at its tenth
+round is evidence the slice is wrong, not a signal to push again.
 
 Green is not clean. A passing roborev status context and green CI do not mean
 the review found nothing: roborev's own commit status reports success even
