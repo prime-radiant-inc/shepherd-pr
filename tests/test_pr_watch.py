@@ -13,7 +13,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = Path(os.environ.get('PRWATCH_TEST_SCRIPT', ROOT / 'skills/shepherd-pr/references/pr-watch.sh'))
+SCRIPT = Path(os.environ.get('PRWATCH_TEST_SCRIPT', ROOT / 'skills/shepherd-pr/scripts/pr-watch.py'))
 
 # This fixture returns REST-shaped responses and honors pagination. The optional
 # --jq support lets the same regression demonstrate the preserved source defect;
@@ -145,7 +145,7 @@ class WatcherTests(unittest.TestCase):
         # The original source expects the caller to provide an existing parent.
         if not self.state.exists() and not self.state.is_symlink():
             self.state.mkdir(mode=0o700, exist_ok=True)
-        return subprocess.run(['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
+        return subprocess.run([sys.executable, str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
                                '--state-dir', str(self.state), *args],
                               env=self.env, cwd=self.directory, text=True, capture_output=True, timeout=15)
 
@@ -153,7 +153,7 @@ class WatcherTests(unittest.TestCase):
         self.fixture.write_text(json.dumps(self.data))
         if not self.state.exists() and not self.state.is_symlink():
             self.state.mkdir(mode=0o700, exist_ok=True)
-        return subprocess.Popen(['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
+        return subprocess.Popen([sys.executable, str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
                                  '--state-dir', str(self.state), *args],
                                 env=self.env, cwd=self.directory, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -199,7 +199,7 @@ class WatcherTests(unittest.TestCase):
         self.assertIn('error', result.stderr.lower())
 
     def test_help_and_usage(self):
-        help_result = subprocess.run(['bash', str(SCRIPT), '--help'], env=self.env,
+        help_result = subprocess.run([sys.executable, str(SCRIPT), '--help'], env=self.env,
                                      text=True, capture_output=True, timeout=15)
         self.assert_success(help_result, '--repo OWNER/REPO')
         for term in ('--pr NUMBER', '--state-dir DIR', '--count N', '--interval SECONDS',
@@ -211,7 +211,7 @@ class WatcherTests(unittest.TestCase):
                      ['--repo', 'a/b', '--pr', '1', '--unknown'],
                      ['--repo', 'a/b', '--pr', '1', '--repo', 'c/d']):
             with self.subTest(args=args):
-                result = subprocess.run(['bash', str(SCRIPT), *args], env=self.env,
+                result = subprocess.run([sys.executable, str(SCRIPT), *args], env=self.env,
                                         text=True, capture_output=True, timeout=15)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn('usage', result.stderr.lower())
@@ -567,7 +567,7 @@ class WatcherTests(unittest.TestCase):
 
     def test_concurrent_observations_have_one_baseline(self):
         self.fixture.write_text(json.dumps(self.data))
-        command = ['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
+        command = [sys.executable, str(SCRIPT), '--repo', self.data['repo'], '--pr', str(self.data['pr']),
                    '--state-dir', str(self.state)]
         processes = [subprocess.Popen(command, env=self.env, cwd=self.directory,
                                      text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE) for _ in range(4)]
@@ -591,7 +591,7 @@ class WatcherTests(unittest.TestCase):
         context = multiprocessing.get_context('spawn')
         barrier = context.Barrier(4)
         results = context.Queue()
-        helper = str(SCRIPT.with_name('pr_watch.py'))
+        helper = str(SCRIPT)
         processes = [context.Process(target=concurrent_lock_worker,
                                      args=(helper, str(self.state), barrier, results)) for _ in range(4)]
         errors = []
@@ -618,7 +618,7 @@ class WatcherTests(unittest.TestCase):
         (self.bin / 'python3').symlink_to(sys.executable)
         self.env['PATH'] = str(self.bin)
         self.fixture.write_text(json.dumps(self.data))
-        result = subprocess.run(['/bin/bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', '954',
+        result = subprocess.run([sys.executable, str(SCRIPT), '--repo', self.data['repo'], '--pr', '954',
                                  '--state-dir', str(self.state)], env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn('gh', result.stderr)
@@ -626,18 +626,11 @@ class WatcherTests(unittest.TestCase):
 
     def test_default_state_location(self):
         self.fixture.write_text(json.dumps(self.data))
-        result = subprocess.run(['bash', str(SCRIPT), '--repo', self.data['repo'], '--pr', '954'],
+        result = subprocess.run([sys.executable, str(SCRIPT), '--repo', self.data['repo'], '--pr', '954'],
                                 env=self.env, cwd=self.directory, text=True, capture_output=True, timeout=15)
         self.assert_success(result, 'PRWATCH armed')
         self.assertEqual(len(list((self.directory / 'xdg' / 'shepherd-pr').glob('*.json'))), 1)
         self.assertFalse(self.state.exists())
-
-    def test_missing_python_is_operational_error(self):
-        self.env['PATH'] = str(self.bin)
-        result = subprocess.run(['/bin/bash', str(SCRIPT), '--help'], env=self.env,
-                                text=True, capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertIn('python3 is required', result.stderr)
 
     def test_error_diagnostics_redact_authentication_secrets(self):
         self.assert_success(self.run_watcher(), 'PRWATCH armed')

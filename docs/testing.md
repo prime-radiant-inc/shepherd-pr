@@ -36,10 +36,10 @@
 ## Review-reader and triage checks
 
 Added 2026-09-11: two read-only tools join the watcher —
-`roborev-review.sh` (reads the roborev combined-review comment for one pull
-request) and `stale-prs.sh` (lists open pull requests idle beyond a cutoff
+`roborev-review.py` (reads the roborev combined-review comment for one pull
+request) and `stale-prs.py` (lists open pull requests idle beyond a cutoff
 with each review state). Shared request, redaction, shape-validation, and
-pagination behavior moved into `references/github_read.py`; the watcher's 34
+pagination behavior moved into `scripts/github.py`; the watcher's 34
 tests stayed green through that extraction with no behavior change (the
 sorted-list normalization moved with `items()` and is still asserted by the
 watcher's order tests).
@@ -58,9 +58,9 @@ redaction in diagnostics, and operational failures that emit no partial
 stdout. The verdict-fallback test was verified to fail with the fallback
 removed, not just to pass.
 
-Live read-only smoke (2026-09-11, authenticated `gh`): `stale-prs.sh` against
+Live read-only smoke (2026-09-11, authenticated `gh`): `stale-prs.py` against
 `prime-radiant-inc/evener` listed 11 non-draft pull requests idle over six
-hours, and `roborev-review.sh` against PRs 593, 628, 1022, and 1123 reported
+hours, and `roborev-review.py` against PRs 593, 628, 1022, and 1123 reported
 states matching a manual reading of the same comments
 (current/review-failed/current/current). The smoke also exposed that recent
 combined reviews carry a `**Verdict:**` sentence rather than severity markers,
@@ -69,7 +69,7 @@ reads, not a claim about GitHub availability or roborev's own behavior.
 
 ## Bounded batch watcher mode (2026-09-12)
 
-`pr-watch.sh` now takes `--count N` (1-1000, default 1) and `--interval SECONDS`
+`pr-watch.py` now takes `--count N` (1-1000, default 1) and `--interval SECONDS`
 (1-86400, default 120). One process performs up to `N` observations, waits
 between them, and exits at the first `PRWATCH change detected` or when the budget
 is exhausted; an unchanged multi-observation batch prints `PRWATCH monitor
@@ -131,8 +131,8 @@ From the repository root (Python 3, Bash; no credentials/network needed):
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_pr_watch.py' -v
-bash -n skills/shepherd-pr/references/pr-watch.sh
-bash skills/shepherd-pr/references/pr-watch.sh --help
+python3 -m py_compile skills/shepherd-pr/scripts/pr-watch.py
+python3 skills/shepherd-pr/scripts/pr-watch.py --help
 ```
 
 Coverage includes baseline/no-change, edited bodies, head/CI/merge state,
@@ -167,7 +167,8 @@ SPDX comparison, or model/application scenario was repeated in this fix wave.
 
 ```bash
 python3 -m unittest discover -s tests -v
-find scripts skills -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find skills/shepherd-pr/scripts -type f -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 git diff --check
 ```
 
@@ -297,14 +298,14 @@ model behavior and live merge workflows remain unverified.
 
 ## Settle detector (2026-09-17)
 
-`pr-settle.sh` joins the reference tools. It answers "is this pull request
+`pr-settle.py` joins the reference tools. It answers "is this pull request
 finished waiting?" rather than "what changed?": a bounded `--count`/`--interval`
 poll prints one short `PRSETTLE state` line only when the state class changes,
 then a final `PRSETTLE settled` line, and exits 0 settled / 1 timeout or
 operational failure / 2 usage error. Settled requires the head still equal
 `--head`, no outstanding check, and roborev's combined review naming that exact
 head; it does not claim the review is clean. The tool reuses
-`roborev_review.py`, so its severity/verdict hint matches `roborev-review.sh`,
+`scripts/github.py`, so its severity/verdict hint matches `roborev-review.py`,
 and it reports roborev's own passing commit status separately as
 `roborev_check`.
 

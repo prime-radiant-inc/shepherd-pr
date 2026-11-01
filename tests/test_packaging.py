@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -48,7 +49,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_source_and_generated_manifest(self):
         config = (ROOT / 'everyharness.yaml').read_text()
-        for line in ('name: shepherd-pr', 'version: 0.3.1', 'license: MIT',
+        for line in ('name: shepherd-pr', 'version: 0.4.0', 'license: MIT',
                      'repository: https://github.com/prime-radiant-inc/shepherd-pr'):
             self.assertIn(line, config.splitlines())
         manifest = json.loads((ROOT / '.everyharness/manifest.json').read_text())
@@ -63,7 +64,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertTrue(os.access(path, os.X_OK), name)
         package = json.loads((ROOT / 'package.json').read_text())
         self.assertEqual(package['name'], 'shepherd-pr')
-        self.assertEqual(package['version'], '0.3.1')
+        self.assertEqual(package['version'], '0.4.0')
         self.assertEqual(package['license'], 'MIT')
         self.assertNotIn('devDependencies', package)
         self.assertFalse((ROOT / 'package-lock.json').exists())
@@ -96,16 +97,16 @@ class PackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory) / 'shepherd-pr'
             shutil.copytree(ROOT / 'skills/shepherd-pr', bundle)
-            entry = bundle / 'references/pr-watch.sh'
+            entry = bundle / 'scripts/pr-watch.py'
             self.assertTrue(os.access(entry, os.X_OK))
-            self.assertTrue((entry.parent / 'pr_watch.py').is_file())
+            self.assertTrue((entry.parent / 'github.py').is_file())
             for doc in bundle.rglob('*.md'):
                 self.check_links(doc, bundle)
                 for code in re.findall(r'```bash\n(.*?)\n```', doc.read_text(), re.S):
                     result = subprocess.run(['bash', '-n'], input=code,
                                             text=True, capture_output=True)
                     self.assertEqual(result.returncode, 0, result.stderr)
-            result = subprocess.run(['bash', str(entry), '--help'], cwd=directory,
+            result = subprocess.run([sys.executable, str(entry), '--help'], cwd=directory,
                                     text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('--repo', result.stdout)

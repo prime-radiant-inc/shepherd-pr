@@ -46,10 +46,9 @@ Ask your agent to use `shepherd-pr`, for example:
 > is missing, report who must act. Monitor for at most five observations.
 
 The [skill reference](skills/shepherd-pr/SKILL.md) is also readable directly.
-Keep the entire skill directory together: the bundled tools require their
-adjacent Python helpers (`references/pr_watch.py`, `pr_settle.py`,
-`roborev_review.py`, `stale_prs.py`, `github_read.py`), not just the
-shell files.
+Keep the entire skill directory together: every command is one Python file in
+`scripts/`, and `scripts/github.py` is the shared request, gate-discovery and
+review-parsing module they all import.
 
 ## Prerequisites
 
@@ -67,8 +66,8 @@ shell files.
 Run from this checkout, or substitute the installed skill's absolute path:
 
 ```bash
-bash skills/shepherd-pr/references/pr-watch.sh --help
-bash skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42
+python3 skills/shepherd-pr/scripts/pr-watch.py --help
+python3 skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42
 ```
 
 `example/widgets` is an illustrative target: replace it and `42` with your PR.
@@ -102,7 +101,7 @@ waiting. `--count 1` matches the original one-observation behavior.
 
 ```bash
 # Up to five observations, 120 seconds apart; stops at the first change.
-bash skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
+python3 skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42 \
   --count 5 --interval 120
 ```
 
@@ -145,7 +144,7 @@ directory you selected. This resets baselines. Never delete a live lock.
 
 ### Settle detection
 
-`pr-settle.sh` answers a different question from the change watcher: not "what
+`pr-settle.py` answers a different question from the change watcher: not "what
 changed?" but "is this pull request finished waiting?" It polls one PR for a
 bounded `--count`/`--interval` (same flags as the watcher) and prints a short
 `PRSETTLE state` line only when the state class changes, then a final line.
@@ -157,7 +156,7 @@ approving reviews, merge queue and roborev presence, then prints one
 state, then exits without waiting, and does not need `--head`:
 
 ```bash
-bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 --gates
+python3 skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 --gates
 ```
 
 The line ends in `next=`: `wait`, `fix`, `approval`, `enqueue`, `merge`,
@@ -165,7 +164,7 @@ The line ends in `next=`: `wait`, `fix`, `approval`, `enqueue`, `merge`,
 prints `gates=unknown` and the wait still runs.
 
 ```bash
-bash skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --count 40 --interval 60
 ```
 
@@ -212,11 +211,11 @@ Two more read-only tools are bundled with the same explicit-repository,
 paginated, credential-redacting conventions as the watcher:
 
 ```bash
-bash skills/shepherd-pr/references/roborev-review.sh --repo example/widgets --pr 42
-bash skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
+python3 skills/shepherd-pr/scripts/roborev-review.py --repo example/widgets --pr 42
+python3 skills/shepherd-pr/scripts/stale-prs.py --repo example/widgets --hours 6
 ```
 
-`roborev-review.sh` reads a pull request's roborev combined-review comment —
+`roborev-review.py` reads a pull request's roborev combined-review comment —
 RoboRev edits one comment in place rather than posting new ones — and reports
 the review state: `passed` (a review of the current head found no issues),
 `current` (reviewed commit equals the head), `stale` (the head moved after
@@ -224,7 +223,7 @@ the review), `review-failed` (a review could not complete), `unparsed`, or
 `none`. It prints one ROBOREV summary line and the full review
 body.
 
-`stale-prs.sh` lists open pull requests whose last update is older than
+`stale-prs.py` lists open pull requests whose last update is older than
 `--hours` (default 6), oldest first, with each pull request's review state,
 excluding drafts unless `--include-drafts` is passed; `--json` emits
 machine-readable output. Use it to find pull requests that need shepherding.
@@ -249,7 +248,7 @@ review findings against code and tests. Compare the reviewed commit with both
 the pushed head and local tip before fixing stale findings. This applies to
 all reviews; RoboRev's edited combined comments need body and reviewed-SHA
 comparison, not merely a new-comment-ID check — the bundled
-[roborev-review.sh](#review-reading-and-stale-pull-request-triage) performs
+[roborev-review.py](#review-reading-and-stale-pull-request-triage) performs
 that comparison.
 
 ## Development and limitations
@@ -259,7 +258,8 @@ credentials (Python 3.9+, Bash, Git):
 
 ```bash
 python3 -m unittest discover -s tests -v
-find scripts skills -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+find skills/shepherd-pr/scripts -type f -name '*.py' -print0 | xargs -0 -n1 python3 -m py_compile
 ```
 
 Regenerate native manifests; do not hand-edit generated outputs. The wrapper

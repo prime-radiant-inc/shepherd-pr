@@ -37,7 +37,7 @@ required approving reviews, merge queue and roborev presence, then prints one
 `PRSETTLE gates` line. Ask for the line alone, before pushing, with:
 
 ```bash
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py \
   --repo example/widgets --pr 42 --gates
 ```
 
@@ -54,12 +54,9 @@ happens in the queue, not on the PR head. Neither is a reason to write a watcher
 Use a bundled read-only observation tool, and pick it by the question you are
 asking:
 
-- The [watcher](references/pr-watch.sh), with its adjacent
-  [Python helper](references/pr_watch.py), answers “tell me the moment
-  anything changes” — a new comment, a new commit from someone else, any CI
-  transition.
-- The settle detector [pr-settle.sh](references/pr-settle.sh), with its
-  adjacent [Python helper](references/pr_settle.py), answers “tell me when this
+- The [watcher](scripts/pr-watch.py) answers “tell me the moment anything
+  changes” — a new comment, a new commit from someone else, any CI transition.
+- The [settle detector](scripts/pr-settle.py) answers “tell me when this
   PR is finished waiting” — head unchanged, no check outstanding (the *current*
   run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
   superseded history), the review gate satisfied, and — where the repository
@@ -87,27 +84,27 @@ directory and read `--help` for dependencies, state, and exit statuses.
 
 ```bash
 # One observation.
-bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42
+python3 /path/to/skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42
 
 # A bounded batch: at most nine observations, 90 seconds apart, stopping at the
 # first change.
-bash /path/to/skills/shepherd-pr/references/pr-watch.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-watch.py --repo example/widgets --pr 42 \
   --count 9 --interval 90
 
 # The standard wait: at most 40 observations, 60 seconds apart. The head
 # defaults to the one observed now, so this is the whole command.
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --count 40 --interval 60
 
 # When another actor might push, pin the head you are judging.
 head=$(gh pr view 42 --repo example/widgets --json headRefOid --jq .headRefOid)
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --head "$head" --count 40 --interval 60
 
 # Wait for the human approval this repository requires, then for the queue.
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --head "$head" --until approved --count 40 --interval 60
-bash /path/to/skills/shepherd-pr/references/pr-settle.sh --repo example/widgets --pr 42 \
+python3 /path/to/skills/shepherd-pr/scripts/pr-settle.py --repo example/widgets --pr 42 \
   --head "$head" --until merged --count 60 --interval 60
 ```
 
@@ -159,10 +156,10 @@ repository, paginated reads, redacted diagnostics, exit 0 success /
 
 ```bash
 # Read one PR's roborev combined review (the bot edits one comment in place).
-bash /path/to/skills/shepherd-pr/references/roborev-review.sh --repo example/widgets --pr 42
+python3 /path/to/skills/shepherd-pr/scripts/roborev-review.py --repo example/widgets --pr 42
 
 # List open PRs with no update in N hours; drafts are excluded unless asked.
-bash /path/to/skills/shepherd-pr/references/stale-prs.sh --repo example/widgets --hours 6
+python3 /path/to/skills/shepherd-pr/scripts/stale-prs.py --repo example/widgets --hours 6
 ```
 
 The reader prints a ROBOREV summary line — head, reviewed commit, state
@@ -208,7 +205,7 @@ to merge.
    file/line evidence and batch valid findings with regression tests.
    Optional RoboRev edits its combined comment in place; compare its body
    and `Combined Review` SHA, not just comment ID. The bundled
-   `references/roborev-review.sh` performs exactly that comparison. When a
+   `scripts/roborev-review.py` performs exactly that comparison. When a
    finding is fixed, reproduce the reviewer's scenario as a test, then prove
    the test fails without the fix: revert or mutate the fix locally, watch it
    fail with the reviewer's own complaint, restore, and re-run. Report that

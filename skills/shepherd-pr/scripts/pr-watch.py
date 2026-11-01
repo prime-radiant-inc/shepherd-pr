@@ -15,14 +15,13 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from github_read import (ReadError, author, field, items, parse_json,  # noqa: E402
-                         request, require, selected)
-import github_gates  # noqa: E402
-from roborev_review import MARKER as ROBOREV_MARKER  # noqa: E402
+from github import (MARKER as ROBOREV_MARKER, ReadError, author,  # noqa: E402
+                    describe_gates, discover_gates, field, items, parse_json,
+                    request, require, selected)
 
 
 HELP = """One or more read-only GitHub.com PR observations; no background service.
-Dependencies: bash, gh (authenticated GitHub CLI with --paginate/--slurp),
+Dependencies: gh (authenticated GitHub CLI with --paginate/--slurp),
 python3 (standard library), on macOS or Linux.
 
 Output: PRWATCH armed on the first complete observation; PRWATCH no change
@@ -79,7 +78,7 @@ def arguments():
         description=HELP, formatter_class=argparse.RawDescriptionHelpFormatter,
         usage='%(prog)s --repo OWNER/REPO --pr NUMBER [--state-dir DIR] '
               '[--count N] [--interval SECONDS]',
-        prog='pr-watch.sh', allow_abbrev=False)
+        prog='pr-watch.py', allow_abbrev=False)
     parser.add_argument('--repo', required=True, action=Once, metavar='OWNER/REPO')
     parser.add_argument('--pr', required=True, action=Once, metavar='NUMBER')
     parser.add_argument('--state-dir', action=Once, metavar='DIR')
@@ -262,8 +261,7 @@ def observe(args):
                        for entry in current['statuses'])
                 or any(ROBOREV_MARKER in (entry.get('body') or '')
                        for entry in current['issue_comments']))
-            gates = github_gates.describe(
-                github_gates.discover(args.repo, base), roborev)
+            gates = describe_gates(discover_gates(args.repo, base), roborev)
             print(f'PRWATCH armed — baseline recorded for {args.repo}#{args.pr} '
                   f'{gates}', flush=True)
             return 'armed'

@@ -27,13 +27,13 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from github_read import ReadError, diagnostic, field, parse_json, require  # noqa: E402
-import github_gates  # noqa: E402
-import roborev_review  # noqa: E402
+from github import (ReadError, describe_gates, diagnostic, discover_gates,  # noqa: E402
+                    field, parse_json, require, review as review_comment,
+                    roborev_comments, same_commit, severity_text)
 
 
 HELP = """One bounded, read-only settle watch for one GitHub.com pull request.
-Dependencies: bash, gh (authenticated GitHub CLI), python3 (standard library),
+Dependencies: gh (authenticated GitHub CLI), python3 (standard library),
 on macOS or Linux.
 
 You do not need to tell this tool which gates the repository has. On every
@@ -66,7 +66,7 @@ Settled does NOT mean the review is clean. roborev edits one combined comment in
 place, so the reviewed SHA in its header says whether the review is current.
 roborev's own commit status reports success even while its comment lists
 findings; this tool reports that check separately as roborev_check and never
-treats it as a verdict. Read the full review body with roborev-review.sh before
+treats it as a verdict. Read the full review body with roborev-review.py before
 closing a round.
 
 Terminal outcomes stop the batch early instead of burning the budget:
@@ -120,7 +120,7 @@ def arguments():
         usage='%(prog)s --repo OWNER/REPO --pr NUMBER [--head SHA] '
               '[--until auto|settled|approved|merged] [--gates] '
               '[--count N] [--interval SECONDS]',
-        prog='pr-settle.sh', allow_abbrev=False)
+        prog='pr-settle.py', allow_abbrev=False)
     parser.add_argument('--repo', required=True, action=Once, metavar='OWNER/REPO')
     parser.add_argument('--pr', required=True, action=Once, metavar='NUMBER')
     parser.add_argument('--head', action=Once, metavar='SHA')
@@ -153,11 +153,6 @@ def arguments():
     # GitHub repository identity is case insensitive.
     args.repo = args.repo.lower()
     return args
-
-
-def same_commit(one, other):
-    """A full SHA matches its own prefix; case was normalized on read."""
-    return one.startswith(other) or other.startswith(one)
 
 
 def pull_state(repo, pr):
@@ -291,10 +286,10 @@ def roborev_check(entries):
 
 def roborev_state(repo, pr, head):
     """The roborev combined review's currency for the current head, reusing the
-    reader's parser so the reported hint matches roborev-review.sh."""
-    outcome = roborev_review.review(roborev_review.comments(repo, pr), head)
+    reader's parser so the reported hint matches roborev-review.py."""
+    outcome = review_comment(roborev_comments(repo, pr), head)
     return (outcome['state'], outcome['reviewed'],
-            roborev_review.severity_text(outcome['severities']),
+            severity_text(outcome['severities']),
             outcome['verdict'])
 
 
@@ -391,7 +386,7 @@ def render(prefix, args, fields):
 def render_gates(args, fields):
     gates = fields['gates']
     return (f'PRSETTLE gates repo={fields["repo"]} '
-            + github_gates.describe(gates, fields['roborev'])
+            + describe_gates(gates, fields['roborev'])
             + f' checks={checks_text(fields)} review={fields["approval"]} '
               f'merge={fields["merge_state"]} '
               f'pr={fields["pr_state"]} next={fields["next"]}')
@@ -420,7 +415,7 @@ def main():
         pull = pull_state(args.repo, args.pr)
         if args.head is None and not args.gates:
             args.head = pull['head']
-        gates = github_gates.discover(args.repo, pull['base'])
+        gates = discover_gates(args.repo, pull['base'])
         fields = None
         last = None
         for number in range(1, args.count + 1):
