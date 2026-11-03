@@ -396,6 +396,21 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count('PRSETTLE merged'), 1, result.stdout)
 
+    def test_already_merged_settles_on_the_first_observation(self):
+        # A merge that happened before the detector started is the final
+        # answer: no --until merged is needed and no budget is consumed.
+        self.data['state'] = 'MERGED'
+        result = self.run_tool('--count', '40', '--interval', '1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE merged'), 1, result.stdout)
+        self.assertNotIn('PRSETTLE state', result.stdout)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
+
+    def test_already_settled_exits_on_the_first_observation(self):
+        result = self.run_tool('--count', '40', '--interval', '1')
+        self.assert_settled(result)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
+
     def test_closed_unmerged_ends_the_wait(self):
         self.data['state'] = 'CLOSED'
         result = self.run_tool()
