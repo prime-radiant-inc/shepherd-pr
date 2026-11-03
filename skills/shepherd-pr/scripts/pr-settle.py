@@ -42,8 +42,8 @@ required status checks, required approving reviews, merge queue, and whether the
 repository runs roborev. It prints one PRSETTLE gates line naming them and a
 `next=` action, then waits for the gate this pull request must actually clear:
 
-  --until auto (default)  CI, review, and an approving review when the
-                          repository requires one;
+  --until auto (default)  CI and review; a still-needed approval is reported
+                          as next=approval instead of being waited on;
   --until settled         CI and review only, even when approval is required;
   --until approved        CI, review, and an approving review;
   --until merged          until GitHub reports the pull request merged,
@@ -54,9 +54,9 @@ which is the right choice for a wait you start after your own push. Pass it
 explicitly (a 7-64 character SHA prefix works) to notice that someone else
 replaced the head you are waiting on.
 
-Settled means the head still equals --head, no check is outstanding, roborev's
-combined review names that exact head where the repository runs roborev, and
-the required approval is present.
+Settled means the head still equals --head, no check is outstanding, and
+roborev's combined review names that exact head where the repository runs
+roborev. Under --until approved the required approval must also be present.
 No check is outstanding when the current run of every check name is COMPLETED
 with SUCCESS, NEUTRAL or SKIPPED, and the current commit status per context is
 SUCCESS or NEUTRAL. statusCheckRollup keeps history, so a superseded CANCELLED
@@ -349,7 +349,10 @@ def observe(args, gates, pull):
     elif args.until == 'settled':
         settled = gate_ok
     else:
-        settled = gate_ok and (approved or not approval_required or args.allow_unapproved)
+        # auto stops as soon as CI and review are done. A missing human
+        # approval is reported as next=approval, not waited on: the agent can
+        # act (request it or report the blocker) right away.
+        settled = gate_ok
     fields = {'repo': args.repo, 'head': current_head,
               'wanted': args.head or '-', 'pending': pending, 'failed': failed,
               'review': review, 'reviewed': reviewed, 'severities': severities,

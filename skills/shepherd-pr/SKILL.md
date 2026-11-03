@@ -61,14 +61,14 @@ asking:
   run per check name, as `gh pr checks` reports it; `statusCheckRollup` keeps
   superseded history), the review gate satisfied, and — where the repository
   runs roborev — its combined review written for that exact head. `--until auto`,
-  the default, also requires the approving review when the repository requires
-  one. It reports the approval decision, merge state and PR state, and it covers
-  the waits agents used to hand-roll:
+  the default, stops when CI and review are done; a missing approval is reported
+  as `next=approval` rather than waited on. It reports the approval decision,
+  merge state and PR state, and it covers the waits agents used to hand-roll:
 
 | The wait is on | Invocation |
 | --- | --- |
-| CI, review and any required approval for a known head | `--count 40 --interval 60` |
-| Someone else's approving review, on a repository whose policy disagrees | `--until approved` |
+| CI and review for a known head | `--count 40 --interval 60` |
+| Someone else's approving review | `--until approved` |
 | A merge queue finishing the merge | `--until merged` |
 | CI and review only, ignoring approval | `--until settled` |
 | CI only, in a repository without roborev | automatic, or `--no-review` |

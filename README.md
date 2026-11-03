@@ -174,8 +174,8 @@ you want the wait to stop on the replacement.
 
 Settled means the head still equals `--head`, no check is outstanding, the
 review gate is satisfied, and the approval gate is satisfied. `--until auto`
-(the default) includes the approving review only where the repository requires
-one; `--until settled` ignores approval, `--until approved` requires it, and
+(the default) stops when CI and review are done and reports `next=approval` if
+an approval is still needed; `--until approved` waits for it, and
 `--until merged` waits for the merge queue. "Outstanding" is
 judged on the current run of each check name and the current state of each
 commit-status context: a check run is outstanding unless it is COMPLETED with

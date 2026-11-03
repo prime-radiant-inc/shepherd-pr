@@ -359,13 +359,15 @@ class SettleTests(unittest.TestCase):
         self.assert_settled(result)
         self.assertIn('roborev=skipped', result.stdout)
 
-    def test_approval_requirement_blocks_settlement_without_admin_override(self):
+    def test_missing_approval_is_reported_not_waited_on(self):
         self.data['review_decision'] = 'REVIEW_REQUIRED'
         result = self.run_tool()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assert_settled(result)
         self.assertIn('review=REVIEW_REQUIRED', result.stdout)
-        self.assertNotIn('PRSETTLE settled', result.stdout)
-        self.assert_settled(self.run_tool('--allow-unapproved'))
+        self.assertIn('next=approval', result.stdout)
+        result = self.run_tool('--allow-unapproved')
+        self.assert_settled(result)
+        self.assertIn('next=merge', result.stdout)
 
     def test_changes_requested_ends_the_wait(self):
         self.data['review_decision'] = 'CHANGES_REQUESTED'
@@ -431,20 +433,22 @@ class SettleTests(unittest.TestCase):
         self.assertIn('queue=yes', result.stdout)
         self.assertIn('next=enqueue', result.stdout)
 
-    def test_auto_waits_for_a_required_approval_but_settled_does_not(self):
+    def test_auto_reports_a_required_approval_instead_of_waiting(self):
         self.data['protection'] = {
             'required_status_checks': {'contexts': ['tests']},
             'required_pull_request_reviews': {'required_approving_review_count': 1}}
         self.data['review_decision'] = 'REVIEW_REQUIRED'
         result = self.run_tool()
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assert_settled(result)
         self.assertIn('approvals=1', result.stdout)
         self.assertIn('next=approval', result.stdout)
-        self.assertNotIn('PRSETTLE settled', result.stdout)
-        result = self.run_tool('--until', 'settled')
-        self.assert_settled(result)
+        result = self.run_tool('--until', 'approved')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('next=approval', result.stdout)
-        self.assert_settled(self.run_tool('--allow-unapproved'))
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+        result = self.run_tool('--allow-unapproved')
+        self.assert_settled(result)
+        self.assertIn('next=merge', result.stdout)
 
     def test_unreadable_gates_still_settle(self):
         self.data['fail_many'] = ['protection', 'rulesets']
