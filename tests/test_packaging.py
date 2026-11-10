@@ -49,7 +49,7 @@ class PackagingTests(unittest.TestCase):
 
     def test_source_and_generated_manifest(self):
         config = (ROOT / 'everyharness.yaml').read_text()
-        for line in ('name: shepherd-pr', 'version: 0.4.2', 'license: MIT',
+        for line in ('name: shepherd-pr', 'version: 0.4.3', 'license: MIT',
                      'repository: https://github.com/prime-radiant-inc/shepherd-pr'):
             self.assertIn(line, config.splitlines())
         manifest = json.loads((ROOT / '.everyharness/manifest.json').read_text())
@@ -64,7 +64,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertTrue(os.access(path, os.X_OK), name)
         package = json.loads((ROOT / 'package.json').read_text())
         self.assertEqual(package['name'], 'shepherd-pr')
-        self.assertEqual(package['version'], '0.4.2')
+        self.assertEqual(package['version'], '0.4.3')
         self.assertEqual(package['license'], 'MIT')
         self.assertNotIn('devDependencies', package)
         self.assertFalse((ROOT / 'package-lock.json').exists())
