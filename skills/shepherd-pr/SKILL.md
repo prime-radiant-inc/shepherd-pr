@@ -148,6 +148,11 @@ supports; do not invent tools:
 | Background completion notifications | Run the batch as a background job; inspect its output when it completes. |
 | Neither | Run one observation, report state, and name the need for another observation. |
 
+Once the batch is running in the background and you have nothing else to do
+for this pull request, end your turn; the batch's completion or match wakes
+you. Checking on it with job-status or output reads in between costs a full
+model turn each and tells you nothing the wakeup will not.
+
 ### Reviews and stale pull requests
 
 Two more bundled read-only tools share the watcher's conventions: explicit
@@ -228,6 +233,10 @@ repository has no RoboRev.
    gates. Distinguish aggregation failures from their failed dependencies.
    Compare against the actual base in an isolated worktree. Report unrelated
    failures with evidence and an owner; do not silently absorb or ignore them.
+   Read only the failed job's log, filtered to the failure (for example
+   `gh run view <run> --repo <owner/repo> --log-failed | grep -n -B5 -A20
+   -E 'FAIL|Error|panic'`), rather than pulling whole multi-megabyte logs into
+   context.
 2. **Reviews:** inspect full bodies, including edited issue/inline comments
    and submitted reviews. Compare reviewed SHA with both PR head and local
    tip. Validate each claim against reviewed code and current fixes; record
@@ -247,8 +256,15 @@ repository has no RoboRev.
    a CI run takes, check up-to-dateness immediately before merging and expect
    to repeat “merge base, push, wait” if the base advanced while CI ran;
    report that treadmill when it is what blocks the merge.
-4. **Push:** run affected tests and required repository gates; report exact
-   exits and incomplete checks. Push only to the authorized destination,
+4. **Push:** verify the round, not the whole history of the pull request. Run
+   the tests for this round's findings and the tests of the packages the
+   round touched. Run the repository's heavy pre-push gates once, after those
+   pass, and do not re-run a gate on code unchanged since it last passed. The
+   acceptance set belongs to this round: earlier rounds' finding tests are
+   already in the suite CI runs, so do not keep re-running a growing list of
+   them by hand. When repository instructions say CI is the source of truth
+   for the full suite, let CI run it. Report exact exits and incomplete
+   checks. Push only to the authorized destination,
    verify the remote head, and post finding-to-fix evidence if authorized.
    Prefer the codebase's own precedent for the fix shape: when a reviewer
    offers several remedies, look for a case the repository already solved the
