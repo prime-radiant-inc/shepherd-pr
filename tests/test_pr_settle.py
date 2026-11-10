@@ -40,6 +40,7 @@ pr = str(fixture['pr'])
 routes = {
     prefix + '/issues/' + pr + '/comments': 'issue_comments',
     prefix + '/branches/' + fixture.get('base', 'main') + '/protection': 'protection',
+    prefix + '/pulls/' + pr + '/reviews': 'reviews',
     prefix + '/rulesets': 'rulesets',
     prefix + '/rulesets/1': 'ruleset',
     prefix: 'repository',
@@ -54,7 +55,7 @@ if key in (fixture.get('fail_many') or []) or fixture.get('fail') == key:
 if fixture.get('malformed') == key:
     print('{not-json')
     sys.exit(0)
-defaults = {'protection': None, 'rulesets': [], 'ruleset': {},
+defaults = {'protection': None, 'rulesets': [], 'ruleset': {}, 'reviews': [],
             'repository': {'default_branch': 'main'}}
 if key == 'protection' and key not in fixture:
     print('fixture: Branch not protected (HTTP 404)', file=sys.stderr)
@@ -104,6 +105,11 @@ def roborev_comment(kind='Combined Review', sha=HEAD[:12], extra=''):
     body = f'{MARKER}\n## roborev: {kind} (`{sha}`)\n\nfindings here\n{extra}'
     return {'id': 7, 'body': body, 'user': {'login': 'roborev-primeradiant[bot]'},
             'created_at': '2026-09-17T00:00:00Z', 'updated_at': '2026-09-17T00:00:00Z'}
+
+
+def pr_review(login, state, commit, at='2026-09-17T00:00:00Z'):
+    return {'id': 1, 'user': {'login': login}, 'state': state,
+            'commit_id': commit, 'submitted_at': at}
 
 
 def observation():
@@ -376,6 +382,84 @@ class SettleTests(unittest.TestCase):
         self.assertIn('review=CHANGES_REQUESTED', result.stdout)
         self.assertEqual(result.stdout.count('PRSETTLE blocked'), 1, result.stdout)
 
+    def test_changes_requested_on_a_previous_head_is_not_a_blocker(self):
+        # After a push GitHub still reports the old head's CHANGES_REQUESTED as
+        # the decision. Neither CI nor roborev has judged the new head yet.
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [pr_review('roborev-primeradiant[bot]',
+                                          'CHANGES_REQUESTED', OTHER)]
+        self.data['rollup'] = [run_check('tests', 'IN_PROGRESS', None),
+                               commit_status('roborev', 'PENDING')]
+        self.data['issue_comments'] = [roborev_comment(sha=OTHER[:12])]
+        for until in ('auto', 'settled', 'approved'):
+            result = self.run_tool('--until', until)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertNotIn('PRSETTLE blocked', result.stdout)
+            self.assertIn('next=wait', result.stdout)
+        # roborev reviews the new head and the app approves it.
+        self.data['rollup'] = [run_check('tests'), commit_status('roborev')]
+        self.data['issue_comments'] = [roborev_comment()]
+        self.data['review_decision'] = 'APPROVED'
+        self.assert_settled(self.run_tool('--until', 'approved'))
+
+    def test_stale_changes_requested_still_waits_for_the_new_approval(self):
+        # roborev's verdict names the head but the app has not re-reviewed yet.
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [pr_review('roborev-primeradiant[bot]',
+                                          'CHANGES_REQUESTED', OTHER)]
+        result = self.run_tool('--until', 'approved')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn('PRSETTLE blocked', result.stdout)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+
+    def test_changes_requested_on_the_current_head_blocks(self):
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [pr_review('roborev-primeradiant[bot]',
+                                          'CHANGES_REQUESTED', HEAD)]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE blocked'), 1, result.stdout)
+        self.assertIn('next=fix', result.stdout)
+
+    def test_a_later_approval_by_the_same_reviewer_is_not_changes_requested(self):
+        # Only each reviewer's latest decision counts, as on GitHub.
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [
+            pr_review('alice', 'CHANGES_REQUESTED', HEAD, '2026-09-17T00:00:00Z'),
+            pr_review('alice', 'APPROVED', HEAD, '2026-09-17T01:00:00Z'),
+            pr_review('roborev-primeradiant[bot]', 'CHANGES_REQUESTED', OTHER,
+                      '2026-09-17T00:00:00Z')]
+        result = self.run_tool('--until', 'approved')
+        self.assertNotIn('PRSETTLE blocked', result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_human_changes_requested_on_an_older_head_still_blocks(self):
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [pr_review('alice', 'CHANGES_REQUESTED', OTHER)]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE blocked'), 1, result.stdout)
+
+    def test_human_changes_requested_waits_while_roborev_is_pending(self):
+        self.data['review_decision'] = 'CHANGES_REQUESTED'
+        self.data['reviews'] = [pr_review('alice', 'CHANGES_REQUESTED', OTHER)]
+        self.data['issue_comments'] = [roborev_comment(sha=OTHER[:12])]
+        result = self.run_tool()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn('PRSETTLE blocked', result.stdout)
+
+    def test_required_checks_not_yet_reported_are_outstanding(self):
+        # Right after a push a required check may not have appeared in the
+        # rollup at all; the reported ones being green is not settled.
+        self.data['protection'] = {
+            'required_status_checks': {'contexts': ['tests', 'lint']}}
+        result = self.run_tool('--count', '2', '--interval', '1')
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn('PRSETTLE settled', result.stdout)
+        self.assertIn('checks=outstanding:lint', result.stdout)
+        self.data['rollup'].append(run_check('lint'))
+        self.assert_settled(self.run_tool())
+
     def test_until_approved_waits_for_approval(self):
         self.data['review_decision'] = 'REVIEW_REQUIRED'
         result = self.run_tool('--until', 'approved')
@@ -396,6 +480,21 @@ class SettleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count('PRSETTLE merged'), 1, result.stdout)
 
+    def test_already_merged_settles_on_the_first_observation(self):
+        # A merge that happened before the detector started is the final
+        # answer: no --until merged is needed and no budget is consumed.
+        self.data['state'] = 'MERGED'
+        result = self.run_tool('--count', '40', '--interval', '1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count('PRSETTLE merged'), 1, result.stdout)
+        self.assertNotIn('PRSETTLE state', result.stdout)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
+
+    def test_already_settled_exits_on_the_first_observation(self):
+        result = self.run_tool('--count', '40', '--interval', '1')
+        self.assert_settled(result)
+        self.assertNotIn('PRSETTLE timeout', result.stdout)
+
     def test_closed_unmerged_ends_the_wait(self):
         self.data['state'] = 'CLOSED'
         result = self.run_tool()
@@ -406,6 +505,7 @@ class SettleTests(unittest.TestCase):
         self.data['protection'] = {
             'required_status_checks': {'contexts': ['tests', 'lint']},
             'required_pull_request_reviews': {'required_approving_review_count': 1}}
+        self.data['rollup'].append(run_check('lint'))
         self.data['rulesets'] = [{'id': 1, 'name': 'main merge queue',
                                   'enforcement': 'active', 'target': 'branch'}]
         self.data['ruleset'] = {
