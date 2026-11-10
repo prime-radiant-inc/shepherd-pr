@@ -27,9 +27,10 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from github import (ReadError, describe_gates, diagnostic, discover_gates,  # noqa: E402
-                    field, parse_json, require, review as review_comment,
-                    roborev_comments, same_commit, severity_text)
+from github import (ReadError, author, describe_gates, diagnostic,  # noqa: E402
+                    discover_gates, field, items, parse_json, require,
+                    review as review_comment, roborev_comments, same_commit,
+                    severity_text)
 
 
 HELP = """One bounded, read-only settle watch for one GitHub.com pull request.
@@ -59,7 +60,8 @@ roborev's combined review names that exact head where the repository runs
 roborev. Under --until approved the required approval must also be present.
 No check is outstanding when the current run of every check name is COMPLETED
 with SUCCESS, NEUTRAL or SKIPPED, and the current commit status per context is
-SUCCESS or NEUTRAL. statusCheckRollup keeps history, so a superseded CANCELLED
+SUCCESS or NEUTRAL. A required check that has not appeared yet counts as
+outstanding. statusCheckRollup keeps history, so a superseded CANCELLED
 or FAILURE entry does not count once a newer run for that name exists.
 
 Settled does NOT mean the review is clean. roborev edits one combined comment in
@@ -73,7 +75,10 @@ Terminal outcomes stop the batch early instead of burning the budget:
   * PRSETTLE failed (exit 3): a current check completed FAILURE, TIMED_OUT,
     CANCELLED, ACTION_REQUIRED, STARTUP_FAILURE or STALE;
   * PRSETTLE moved (exit 3): the head was replaced, so re-read and re-arm;
-  * PRSETTLE blocked (exit 3): reviewDecision is CHANGES_REQUESTED;
+  * PRSETTLE blocked (exit 3): reviewDecision is CHANGES_REQUESTED by a review
+    of the current head (or by a human who has not seen it). A roborev
+    CHANGES_REQUESTED on a replaced head is superseded: the wait continues for
+    CI and roborev's review of the new head;
   * PRSETTLE closed (exit 3): closed unmerged;
   * PRSETTLE merged (exit 0): merged.
 
@@ -293,6 +298,43 @@ def roborev_state(repo, pr, head):
             outcome['verdict'])
 
 
+def pull_reviews(repo, pr):
+    return items(f'repos/{repo}/pulls/{pr}/reviews', lambda obj: {
+        'user': author(obj),
+        'state': field(obj, 'state', str).upper(),
+        'commit': field(obj, 'commit_id', str, nullable=True),
+        'at': field(obj, 'submitted_at', str, nullable=True) or ''})
+
+
+def changes_requested_blocks(repo, pr, head, review_current):
+    """Whether GitHub's CHANGES_REQUESTED decision still binds the current head.
+
+    GitHub keeps reporting a reviewer's CHANGES_REQUESTED after a push until that
+    reviewer reviews again, so the decision alone cannot tell a verdict on this
+    head from one on a head that was replaced. Each reviewer's latest decision is
+    judged by the commit it was submitted against: one on the current head blocks.
+    A roborev reviewer's older one is superseded, because roborev re-reviews every
+    head and its verdict for this one is still coming. A human's older one blocks
+    (they have not seen the new head) unless roborev's review of this head is
+    pending, which may change the picture first."""
+    latest = {}
+    for entry in sorted(pull_reviews(repo, pr), key=lambda entry: entry['at']):
+        if entry['state'] in ('APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'):
+            latest[entry['user']] = entry
+    outstanding = [entry for entry in latest.values()
+                   if entry['state'] == 'CHANGES_REQUESTED']
+    if not outstanding:
+        # GitHub says changes are requested but the reviews list does not show
+        # who; do not guess it away.
+        return True
+    for entry in outstanding:
+        if entry['commit'] and same_commit(head, entry['commit']):
+            return True
+        if 'roborev' not in (entry['user'] or '').lower() and review_current:
+            return True
+    return False
+
+
 def next_action(args, fields, gates):
     """The one thing the agent should do next, from the current observation."""
     if fields['pr_state'] == 'MERGED':
@@ -319,6 +361,9 @@ def observe(args, gates, pull):
     current = latest_entries(pull['rollup'])
     pending = sorted(name for name, entry in current.items()
                      if check_class(entry) == 'pending')
+    # A required check that has not reported yet is not a passing check:
+    # branch protection will not merge until it exists and succeeds.
+    pending = sorted(set(pending) | (set(gates['required_checks']) - set(current)))
     failed = sorted(name for name, entry in current.items()
                     if check_class(entry) == 'failed')
     state, reviewed, severities, verdict = roborev_state(args.repo, args.pr, current_head)
@@ -337,6 +382,9 @@ def observe(args, gates, pull):
         review = 'skipped'
         review_current = True
     approval = pull['review_decision']
+    if approval == 'CHANGES_REQUESTED' and not changes_requested_blocks(
+            args.repo, args.pr, current_head, review_current):
+        approval = 'REVIEW_REQUIRED'
     approved = approval in ('', 'APPROVED')
     approval_required = gates['approvals'] > 0 or approval in (
         'REVIEW_REQUIRED', 'CHANGES_REQUESTED')
