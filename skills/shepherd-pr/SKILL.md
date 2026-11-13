@@ -48,8 +48,11 @@ names the one action left — `wait`, `fix`, `approval`, `enqueue`, `merge`,
 still runs, so read the repository's instructions for the missing gate.
 
 `REVIEW_REQUIRED` means a human approval gates the merge, and an approval from
-your own account does not satisfy it. A `merge queue` gate means the merge
-happens in the queue, not on the PR head. Neither is a reason to write a watcher.
+your own account does not satisfy it. An approval gate cannot be satisfied
+while the pull request is a draft — no review can be submitted to one — so
+mark it ready before waiting on an approval. A `merge queue` gate means the
+merge happens in the queue, not on the PR head. Neither is a reason to
+write a watcher.
 
 Use a bundled read-only observation tool, and pick it by the question you are
 asking:
@@ -176,6 +179,14 @@ prints a STALEPR header plus one tab-separated row per pull request, oldest
 first, or JSON with `--json`. Severity counts and verdict text are hints over
 untrusted content; read the review body before acting on any finding.
 
+Triage an older open pull request as an untrusted external contribution
+before repairing anything on it: confirm the problem still exists on the
+base, that the change is the minimal solution, and that it does not alter
+behavior that is working as intended. Close it as already fixed, superseded,
+working-as-intended, or over-engineered, with evidence, or replace it with a
+minimal pull request scoped to the confirmed defect — repairing findings on
+a branch that fails that evaluation validates its over-engineering.
+
 Every push starts a new CI run and invalidates the review. Sequence a review
 round as: make the whole round's edits, merge the base locally if it moved,
 push once, then wait once — one push, one CI run, one review. The settle
@@ -229,10 +240,23 @@ repository has no RoboRev.
 
 ## Triage and verify
 
+Work a blocker inside an authorized round instead of stopping at it: a newly
+failed check is triaged and fixed, not reported and then awaited. Ask before
+consequential scope or architecture choices, conflicting assertions, or
+actions the authorization lacks.
+
 1. **CI:** reproduce the underlying failing job locally using discovered
    gates. Distinguish aggregation failures from their failed dependencies.
-   Compare against the actual base in an isolated worktree. Report unrelated
-   failures with evidence and an owner; do not silently absorb or ignore them.
+   Compare against the actual base in an isolated worktree. Pull-request CI
+   usually runs on the merge ref — the candidate merged onto the current
+   base — not the branch head, so a base-side regression appears in every
+   open pull request: when a failure's signature is outside the diff, check
+   the same check on the base's own latest run and on sibling pull requests
+   before fixing the candidate. A known flake class unrelated to the diff is
+   rerun and the round continues — rerun the affected check, record the
+   occurrence, and leave the root cause to a separately owned lane instead
+   of a mid-round hunt. Report unrelated failures with evidence and an
+   owner; do not silently absorb or ignore them.
    Read only the failed job's log, filtered to the failure (for example
    `gh run view <run> --repo <owner/repo> --log-failed | grep -n -B5 -A20
    -E 'FAIL|Error|panic'`), rather than pulling whole multi-megabyte logs into
@@ -255,7 +279,12 @@ repository has no RoboRev.
    base branch requires strict up-to-dateness and receives merges faster than
    a CI run takes, check up-to-dateness immediately before merging and expect
    to repeat “merge base, push, wait” if the base advanced while CI ran;
-   report that treadmill when it is what blocks the merge.
+   report that treadmill when it is what blocks the merge. Where branch
+   protection dismisses stale approvals when the base changes, an approval
+   on a head whose merge base predates the base tip does not count even
+   while it still displays as approved; remake the final head as a
+   single-parent commit on the current base, and once the review gate
+   approves, enqueue immediately — a queue entry survives later base moves.
 4. **Push:** verify the round, not the whole history of the pull request. Run
    the tests for this round's findings and the tests of the packages the
    round touched. Run the repository's heavy pre-push gates once, after those
@@ -274,6 +303,37 @@ repository has no RoboRev.
    when the choice is not obvious.
 
 ## Common mistakes and outcome
+
+When the merge runs through a queue, read the outcome from the pull
+request's state, never from its checks surface: the queue runs the
+candidate on a separate merge-group ref, so the head's checks stay green and
+silent the whole wait — green is not `MERGED`. A queue removal is data, not
+a verdict about the change. Read the removal reason and the merge-group run
+before deciding: a green entry with no failed candidate was dropped by a
+batch rebuild when the base moved — re-enqueue the same head; a candidate
+failure on a check the diff cannot construct is the base's or another
+candidate's problem, not the change's — check the same check on the base's
+own latest run before repairing anything. A removal report can also race
+the merge itself: check `state` and `mergeCommit` before re-enqueueing.
+Mid-wait `UNMERGEABLE` with an in-flight `UNKNOWN` mergeability is the
+recompute window after the base moved — re-poll; only a settled
+`DIRTY`/`BLOCKED` mergeability is a real conflict, and checks that never
+run on a pull request head read `SKIPPED`, not failed.
+
+Enqueue through the queue itself — the repository's enqueue script, or the
+`enqueuePullRequest` mutation; `gh pr merge` cannot drive a queue-backed
+base and falls back to auto-merge, which such bases disallow. An enqueue
+refusal while required checks are still pending ("N of M checks are
+expected", "have not succeeded") is retryable, but read the whole refusal:
+one message can bundle a terminal reason such as merge conflicts with
+retryable phrasing, and a loop that matches only the retryable words will
+spend its budget on a condition waiting cannot fix. Retry an identical
+queue drop once. When the drops are ambient — the failing check sits
+outside the diff, the head's own checks are green, and the base's latest run
+fails the same check — post that comparison and take the merge path the
+authorization covers: an administrative merge scoped to exactly that
+barrier, on the same tree the green checks ran on. Never for a red check
+on the head, a stale review, or a failure the diff can reach.
 
 Green CI is not approval, and a settled PR is not a clean one: settlement only
 means the head stopped moving, no check is outstanding, and roborev has written
